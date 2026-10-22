@@ -26,6 +26,7 @@
 3. **建议的 M1 路线**：插件自有模式入口（`/longhaul` 命令 + composer chip）＋ `systemPrompt` 动态 section 注入 ＋ sidecar 树记忆 ＋ 直接调用 `ctx.subagents.startActivation()` 派发 ＋ 自建预算/归属/门禁。不占用 permission picker，不用 goal-round-driver 当引擎。
 4. **D7 需要一次显式确认**：D7 说「切到长任务模式即可，不再加开关」。DSH 的既有模式入口就是 permission picker，但第三方无法注册。因此「长任务模式」只能表现为插件自有入口（命令/客户端控件），这是**一个新开关**，但不是「额外开关」——它本身就是模式开关。记为冲突 C1（§4），不修改 D7。
 5. **M0 空壳没有注册可见入口**：M0 的定义是「可安装空壳 + 十问 + 设计增补」；模式入口属于 M1。这是对 HANDOVER §7「只注册一个入口」的收窄，已记入 decisions D18，待批准。
+6. **2026-10-22 追加提案**：阶段模型改为需求/设计/开发/交付四闸门，阶段末压缩上下文、设计变更环、按阶段选择模型强度。见 [§7](#7-阶段模型修订提案2026-10-22待批准)；对应 decisions D19–D23（其中 D21 触碰 D9，默认关闭）。
 
 ---
 
@@ -311,7 +312,147 @@ S0 Plan → S1 Analyze → S2 Design → S3 Implement → S4 Test → S5 Ship
 
 ---
 
-## 7. 证据索引
+## 7. 阶段模型修订提案（2026-10-22，待批准）
+
+> 来源：项目负责人提出的三阶段模型（需求 / 设计 / 开发）与阶段末上下文压缩、分支合并、设计变更环。
+> 结论：**思路成立，可以融入插件**；DSH 已有压缩、模型选择、会话 fork 的原语。需要把它落成 4 个阶段、1 个变更环和 3 条策略；其中「模型强度」越过 D9 的 v0 边界，需新决策。
+
+### 7.1 为什么成立
+
+1. 阶段特征确实不同：需求期是低频、纯对话、几乎不调工具；设计期是读代码 + 方案比较；开发期是高频工具调用 + 异常处理 + 集成。统一的预算、审批节奏和上下文策略对三者都不最优。
+2. 成本证据支持「阶段末压缩」：上一轮实测中 cacheRead 占总 token 的 98.9%，子会话每步重放整段历史。需求/设计的长对话在阶段结束后继续留在上下文里，只会放大后续每一步的重放成本。
+3. DSH 提供了原语，不需要改上游：
+   - **压缩**：`ctx.compaction.compactNow(agent, signal)` 把一个区间的可见历史替换为一个摘要节点，原始事件仍留在日志里（`packages/compaction/compaction/src/index.ts:162-192`；`command-compact/src/index.ts:67`）。摘要器沿用会话自己的 system prompt 与消息前缀，只追加固定压缩指令，KV-cache 友好（`compaction-basic/src/summarizer.ts:27-28,75-111`）。
+   - **模型选择**：`ctx.sessionController.selectModel({sessionId, provider, model, reasoningEffort})` 在会话内切换下一次请求的模型，并追加持久事件 `model/selection`（`packages/api/session-controller/src/commands.ts:157-191`；`agent.ts:339-342`）。
+   - **分支**：`ctx.subagents.startActivation()` 支持 spawn（干净上下文）与 fork（继承父会话已完成轮次前缀，`subagent-fork-in-process/src/index.ts:34-68`）；`sessionController.fork()` 还能从任意事件前缀派生一个普通会话（`commands.ts:227-310`）。
+4. 这与 D1–D3 不冲突：分支的 process 可以丢，但 decisions/findings/artifacts 仍然按 C 模型落盘；丢的是「聊天过程」，不是「结论」。
+
+### 7.2 阶段与交付件
+
+保留 4 个外部闸门，原 S0–S5 变成阶段内部子步骤：
+
+| 阶段 | 交互方式 | 关键交付件 | 工具权限 | 上下文策略 | 模型角色 |
+|---|---|---|---|---|---|
+| P0 需求 | 对话、提问、澄清；**不写代码** | `00-requirements.md`（目标/范围/非目标/验收/约束/风险/预算）+ 任务计划（任务树、文件归属、里程碑） | 只读 + 提问 + 记忆 | 审批后压缩 + handoff | 强推理、低工具频率 |
+| P1 设计 | 读代码、调研、方案对比；可写设计文档 | `01-design.md`（架构/模块/接口/数据模型/ACL/状态机/依赖选型/失败路径/测试策略）+ ADR | 只读 + 写交付件 + web | 审批后压缩 + handoff | 强推理、中工具频率 |
+| P2 开发 | 自动派发、工具密集、异常处理、集成 | 代码 + `02-implementation.md`（变更清单、测试计划与证据、回滚方案）+ 工程日志 | 父：全工具；子：受限 + 禁止集成命令 | **保留细节**；只在压力/溢出时压缩；关键报错与决策进 findings | 父：强决策；子：快速执行，失败升级 |
+| P3 交付 | 清单确认、发布 | 版本、CHANGELOG、发布记录、验收证据 | 仅父 | 最终摘要 | 强 |
+
+- 「开发期包含测试」：测试作为 P2 的内部子状态（implement → verify → test → integrate），对外只有 P2 完成审批；不再单独设 S4 闸门。
+- 每个交付件有模板与必填小节；缺小节不允许提交审批。
+- 审批仍用 `longhaul_submit` + `ctx.approval.request`，只有 `allowed-once` 推进（D6 不变）。
+
+### 7.3 上下文策略（核心）
+
+阶段切换的固定顺序，缺一不可：
+
+```
+交付件落盘并通过结构校验
+  → 追加交接消息（handoff，见下）
+  → 等 agent 空闲
+  → compactNow(agent)
+  → 再追加一条 handoff（保证它在压缩之后，不被摘要覆盖）
+  → 进入下一阶段
+```
+
+- 为什么不能只靠摘要：压缩指令是固定的（`summarizer.ts:63` 要求「忠实保留用户反馈与显式指令」），但摘要仍是模型生成，可能丢掉具体路径、命令、验收标准。**交付件文件才是权威**；handoff 消息只带指针与硬约束。
+- handoff 内容（固定模板，写入 `user/message`，`source:{kind:'plugin', plugin:'longhaul'}`）：
+  - 当前阶段、下一阶段、交付件绝对路径与版本；
+  - 必读 decisions（id 列表）；
+  - 未决问题与风险；
+  - 本阶段验收命令；
+  - 预算剩余。
+- P0/P1 结束：`compactNow`（让后端选区间）。
+- P2 结束：默认不压缩；若 token 超阈值，用 `compactNow` 保留近期窗口，工程细节已在 findings/artifacts 中。
+- 压缩只改变「可见面」，日志仍完整保留，可被 `sessionQuery` 读回审计。对外话术是「过程从上下文退场」，不是「删除历史」。
+- 触发时机：审批工具返回后设置 `pendingCompaction`，在 `turn/end` 上用 `agent.runMaintenance(() => compactNow(...))` 执行；若被新输入抢先，顺延到下一次 idle（`runtime-types.ts:202`）。
+
+### 7.4 分支与合并
+
+- 默认 `spawn`：父渲染 brief，子拿干净上下文；适合大多数开发任务，token 最省。
+- 需要完整上下文的探索/重构才用 `fork`：子继承父已完成轮次前缀（`subagent-fork-in-process`），成本更高，必须显式在任务计划里声明。
+- 分支结束：子返回结构化摘要 + findings；父做三件事——(a) 把结论 promote 到 decisions/设计文档；(b) 若设计文档变化，走 DCR（见 7.5）；(c) 更新任务树与文件归属。
+- **不 fork 根会话做阶段切换**：`sessionController.fork()` 会生成新的 session id，破坏 `longhaul:<rootSessionId>` 命名空间、用户历史与预算核算。阶段切换用压缩，不用换会话。
+
+### 7.5 设计变更环（DCR）
+
+开发期发现设计问题，是正常路径，不是异常：
+
+```
+P2 执行 → 发现设计缺陷
+  → longhaul_change_request(证据, 影响面, 建议)
+  → 暂停受影响任务（未受影响的继续）
+  → 回 P1 局部：更新 01-design.md + ADR（版本 +1）
+  → 审批（设计变更）
+  → 重新派发受影响任务
+```
+
+约束：
+- DCR 必须带证据（失败命令/日志/反例）与影响面（文件、接口、测试）；
+- 只回退受影响的任务，不做全量重跑；
+- 每个任务最多 2 次 DCR，超过升级用户决策；
+- 设计文档每次变更写 `supersedes`，保留历史；
+- DCR 不计入「阶段失败」，但计入预算与审计。
+
+### 7.6 模型强度策略（触碰 D9）
+
+- 需求/设计：强模型 + 高 reasoning effort；工具少，成本可控。
+- 开发：父用强模型做拆解、集成、冲突决策；子用快速模型做机械执行；连续失败/高不确定性时升级到强模型。
+- 交付：强模型做验收与发布检查。
+- 实现：
+  - 父会话：`ctx.sessionController.selectModel({sessionId, provider, model, reasoningEffort})`（持久 `model/selection`）。
+  - 子会话：`startActivation` 的 `agentOptions` 直接指定 provider/model/reasoningEffort。
+  - 摘要：`compaction` 的 `summarizationProvider/summarizationModel` 可单独选便宜模型（`compaction-basic/src/config.ts:102`）。
+- 边界：这是**静态阶段映射**，不是自演进；但 D9 明确 v0 不做「模型分层」。因此：
+  - 默认 `modelPolicy.mode = 'inherit'`（不切模型），只保留配置与接口；
+  - 开启 = 新决策 D21，需明确批准；
+  - 任何切换都必须写进会话日志（`model/selection` 已自动记录）并可回滚。
+
+### 7.7 与 D1–D9 的关系
+
+| 决策 | 影响 |
+|---|---|
+| D1/D2/D3 | 不变；阶段模型只改流程，不改树治理与记忆 ACL |
+| D4 | 不变；60 步/扇出 6/depth 1 仍是默认，P0/P1 工具少自然用不满 |
+| D5 | 不变；风险确认仍在模式开启时 |
+| D6 | **不冲突**：D6 只要求「计划/分析/设计批准前禁止实现、每阶段交付件 + 审批」；4 阶段满足，S0–S5 降为内部子步骤 |
+| D7 | 不变；入口仍是自有命令 + chip |
+| D8 | 不变 |
+| D9 | **冲突 C4**：模型分层属于 v0 排除项；提案默认关闭，开启需 D21 |
+
+### 7.8 落地拆分与先行 spike
+
+**可直接进入 M1 的部分**
+- 4 阶段状态机、交付件模板、审批、工具权限、预算、记忆；
+- handoff 消息模板与落盘顺序；
+- DCR 状态与任务暂停/恢复；
+- 子 Agent 的 `agentOptions` 与 spawn/fork 选择。
+
+**必须先 spike 的三件事**
+1. `compactNow` 在 `turn/end` + `runMaintenance` 下的实际行为：是否稳定、失败如何回滚、摘要是否保留交付件指针（用真实会话录一次）。
+2. `sessionController.selectModel` 的副作用：它会把选择保存为**全局默认模型**（`commands.ts:177`），阶段切换是否需要恢复原默认值；在 headless/TUI 组合里该服务是否存在。
+3. `fork` 与 `spawn` 的成本/收益：fork 继承前缀的 token 代价 vs brief 的信息损失；至少用两个真实任务对比。
+
+**验收补充**
+- P0/P1 结束后，下一阶段的模型请求中不再包含阶段内的逐条对话（可用 `request/header` + 日志验证）；
+- handoff 中的交付件路径与 decisions 在下一阶段可被模型正确引用；
+- DCR 后只重跑受影响任务，设计文档版本递增；
+- 模型策略关闭时，行为与「无该功能」完全一致。
+
+### 7.9 风险
+
+| 风险 | 对策 |
+|---|---|
+| 摘要丢关键约束 | 交付件为权威 + 压缩后 handoff + 必读 decisions |
+| 压缩不可逆的错觉 | 日志仍保留；文档写明「可见面退场」；提供导出/检索 |
+| 模型降档导致开发质量下降 | 默认 inherit；按任务类型灰度；失败升级 |
+| 阶段切换时 agent 忙 | pendingCompaction + idle 重试；不阻塞用户输入 |
+| DCR 无限循环 | 每任务 2 次上限 + 影响面审批 + 预算计入 |
+| 需求期仍写代码 | P0/P1 用 `tools/pre-execute` 拒绝写实现文件（只允许交付件目录） |
+
+---
+
+## 8. 证据索引
 
 - 模式/UI：`packages/experimental/auto-review/src/index.ts`；`packages/interaction/permission-presets/src/index.ts`；`packages/client/ui-permission-presets/src/client/*`；`docs/subsystems/permission-presets.md`；`docs/subsystems/slots.md`。
 - 指令：`packages/core/system-prompt/src/index.ts`；`packages/plan/plan-mode/src/index.ts`；`packages/core/agent-loop/src/agent.ts`。
