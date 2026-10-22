@@ -35,6 +35,35 @@ pnpm pack                    client.js + lib/** + cordis.patch.yml
 
 未做：真实 Desktop 重启后的 chip 视觉、风险面板布局、projection 在浏览器中的实时更新。需要一次人工/浏览器验收。
 
+### 3.1 运行中的 Desktop 热加载验收（2026-10-22）
+
+插件安装进 desktop profile 后，**运行中的 Desktop 直接热加载了 host 侧**，无需重启：
+
+- `longhaul_status` 返回 `Long Haul mode is off.`
+- `longhaul_memory append_decision` / `append_finding` 成功写入
+  `~/.dsh/longhaul/session-fcd26675-.../decisions.jsonl` 与 `findings/<session>.jsonl`，`list` 能看到 1 decision / 1 finding。
+- `longhaul_plan` 在模式关闭时被拒绝：`Long Haul mode is off; enable it before planning`（阶段闸门生效）。
+- desktop profile 的 `package.json` 与 lock 含 `link:C:/data/project/dsh-longhaul`，`dsh.profile.bundles` 含 `dsh-longhaul`；`cordis.yml` 没有重复行。
+
+### 3.2 独立 web profile 的客户端服务验证
+
+在同一安装的临时 `lh-test` profile 上启动 `dsh web --no-open --port 58999`：
+
+- 首页 HTML 的客户端模块清单包含 `dsh-longhaul/client.js`；
+- 拉取该 `plugins/??...` 组合 bundle（1.9 MB）后包含 `__ModuleLoader__.load`、`conversation.input.left`、`dsh-longhaul`；
+- host 启动日志无错误。
+
+这证明 `dsh.client` 清单、`exports["./client"]` 与模块发现链路成立，剩下的是浏览器内渲染验收。
+
+### 3.3 Desktop 页面内 chip 观察
+
+安装进 desktop profile 后，host 侧热加载成功（见 3.1），但 **页面刷新（Ctrl+R）后 composer 左侧仍未出现 chip**。可能原因：
+
+- desktop 的客户端模块清单可能在应用启动时生成，页面刷新不会重新扫描新增插件；
+- 或 chip 槽位在当前布局中未渲染 / 模块在浏览器内静默失败。
+
+结论：需要**完全退出并重启 Desktop** 做最终视觉验收，而不是刷新页面。如果重启后仍无 chip，用独立 web profile 的 DOM/控制台继续定位。
+
 ## 4. 已知问题
 
 1. **设置页未做**：预算、扇出、交付件目录目前只能改 `cordis.yml`；M1b 收尾补 `settings.section`。
