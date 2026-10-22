@@ -24,7 +24,7 @@
 
 ```text
 pnpm typecheck   exit 0
-pnpm test        exit 0 — 10 files / 97 tests
+pnpm test        exit 0 — 11 files / 98 tests
 pnpm build       exit 0 — lib/*.js + lib/*.d.ts
 node import      exports: Config, apply, inject, name; name=longhaul
 ```
@@ -40,6 +40,7 @@ node import      exports: Config, apply, inject, name; name=longhaul
 - `dispatch.spec.ts` 17：brief、拒绝条件、归属冲突。
 - `guard.spec.ts` 9：交付件路径、集成命令、阶段写门禁、归属拒绝。
 - `tools.spec.ts` 4：dispatch 参数整形、拒绝传播、status 报告、子会话记忆 ACL。
+- `integration/compaction.spec.ts` 1：真实 Session + Cordis 事件总线 + 假压缩后端；验证 `turn/end` 触发一次 `compactNow`，且 handoff 在压缩之后注入、状态落盘为 `compactPending=false`。
 - `integration/plugin.spec.ts` 2：真实 Cordis 组合下注册 6 个工具、section、命令；status 读盘。
 
 ## 3. 已实现的验收点（对照 DESIGN §5）
@@ -54,7 +55,7 @@ node import      exports: Config, apply, inject, name; name=longhaul
 
 ## 4. 未完成 / 已知问题
 
-1. **阶段末压缩未实测**：`turn/end` + `agent.runMaintenance` + `compactNow` 已接线，但尚未在真实会话验证（设计 §7.8 的 spike 1）。
+1. **压缩只做了结构验证**：`turn/end` 调度、`compactNow` 调用、handoff 顺序与状态落盘已有集成测试（假压缩后端）；真实 `compaction-basic` 的摘要质量与失败重试仍需 Desktop 真会话 spike。
 2. **模型策略未接线**：默认 `inherit`，`sessionController.selectModel` 未调用（spike 2 未做）。
 3. **state.json 校验较浅**：只校验 version/rootSessionId，嵌套字段损坏会在使用处暴露；后续加结构校验。
 4. **子会话工具重复派发**：plan 中 running 任务允许再次 dispatch（用于恢复），但会生成第二个 writer；M1b 加单写者锁。
