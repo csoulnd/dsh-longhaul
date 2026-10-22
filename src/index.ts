@@ -276,6 +276,7 @@ export function apply(ctx: Context, config: Config): void {
     load,
     save: persist,
     rootOf,
+    rootSessionOf: agent => childRoots.get(String(agent.session.header.id)) ?? sessionRoot(String(agent.session.header.id)),
     parentOf,
     cwdOf: agent => agent.session.header.cwd ?? process.cwd(),
     approve,

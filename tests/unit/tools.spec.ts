@@ -35,6 +35,7 @@ function runtime(overrides: Partial<ToolRuntime> = {}): ToolRuntime {
     load: async () => current,
     save: async () => {},
     rootOf: () => 'root',
+    rootSessionOf: () => 'root',
     parentOf: () => undefined,
     cwdOf: () => '/work',
     approve: async () => 'allowed-once',
@@ -78,5 +79,32 @@ describe('longhaul_status', () => {
     expect(result.taskCount).toBe(1)
     expect(result.steps).toBe(3)
     expect(result.summary).toMatch(/design v1/)
+  })
+})
+
+describe('longhaul_memory from a child', () => {
+  it('allows branch findings but refuses decisions and promotion', async () => {
+    const findings: string[] = []
+    const store = {
+      appendFinding: async (_sessionId: string, input: { text: string }) => { findings.push(input.text) },
+      appendDecision: async () => { throw new Error('unexpected decision write') },
+      listDecisions: async () => [],
+      listFindings: async () => [],
+      listArtifacts: async () => [],
+      promote: async () => { throw new Error('unexpected promote') },
+    }
+    const tool = createLonghaulTools(runtime({
+      rootOf: () => undefined,
+      rootSessionOf: () => 'root',
+      memoryFor: () => store as never,
+    })).find(candidate => candidate.name === 'longhaul_memory')
+    const child = { session: { header: { id: 'child', cwd: '/work', parentSession: 'root' } } } as never
+
+    await tool!.execute({ action: 'append_finding', text: 'pitfall' }, { agent: child } as never)
+    expect(findings).toEqual(['pitfall'])
+    await expect(tool!.execute({ action: 'append_decision', text: 'x' }, { agent: child } as never))
+      .rejects.toThrow(/only the root session/)
+    await expect(tool!.execute({ action: 'promote', findingId: 'f1' }, { agent: child } as never))
+      .rejects.toThrow(/only the root session/)
   })
 })

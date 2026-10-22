@@ -24,7 +24,7 @@
 
 ```text
 pnpm typecheck   exit 0
-pnpm test        exit 0 — 10 files / 96 tests
+pnpm test        exit 0 — 10 files / 97 tests
 pnpm build       exit 0 — lib/*.js + lib/*.d.ts
 node import      exports: Config, apply, inject, name; name=longhaul
 ```
@@ -39,7 +39,7 @@ node import      exports: Config, apply, inject, name; name=longhaul
 - `guidance.spec.ts` 12：policy/state/handoff/notice。
 - `dispatch.spec.ts` 17：brief、拒绝条件、归属冲突。
 - `guard.spec.ts` 9：交付件路径、集成命令、阶段写门禁、归属拒绝。
-- `tools.spec.ts` 3：dispatch 参数整形、拒绝传播、status 报告。
+- `tools.spec.ts` 4：dispatch 参数整形、拒绝传播、status 报告、子会话记忆 ACL。
 - `integration/plugin.spec.ts` 2：真实 Cordis 组合下注册 6 个工具、section、命令；status 读盘。
 
 ## 3. 已实现的验收点（对照 DESIGN §5）
@@ -47,7 +47,7 @@ node import      exports: Config, apply, inject, name; name=longhaul
 - 未批准 P1 前禁止实现：`phases.canImplement` + `longhaul_submit` 阶段检查 + `tools/pre-execute` 写门禁（只允许 `.longhaul/` 交付件）。
 - 每阶段交付件 + 审批：`longhaul_submit` 校验文件与小节，`ctx.approval.request` 仅 `allowed-once` 推进。
 - 退出/恢复：state.json 原子写 + 插件记录；`/longhaul off` 保留状态。
-- 子只读本分支 findings / decisions 全树 / 跨树拒绝：memory 分支 ACL + root 命名空间；子会话工具接入待 M1b。
+- 子只读本分支 findings / decisions 全树 / 跨树拒绝：memory 分支 ACL + root 命名空间；子会话可 append finding，decisions/promote 仅 root。
 - 预算超限停止并汇报：`subagent/start`/`step/start`/`assistant/message.usage` 已接线；80% 提醒、100% `dispose` 并在父会话通知。
 - 自动派发：`longhaul_dispatch` 调 `ctx.subagents.startActivation`，brief + 结构化 outputSchema + 扇出/归属/DCR 检查；父保持集成门禁。
 - 设计变更环：`longhaul_change` request/decide/list，批准后 designVersion+1、compactPending。
@@ -56,16 +56,15 @@ node import      exports: Config, apply, inject, name; name=longhaul
 
 1. **阶段末压缩未实测**：`turn/end` + `agent.runMaintenance` + `compactNow` 已接线，但尚未在真实会话验证（设计 §7.8 的 spike 1）。
 2. **模型策略未接线**：默认 `inherit`，`sessionController.selectModel` 未调用（spike 2 未做）。
-3. **子会话记忆未开放**：`longhaul_memory` 在子会话直接拒绝（M1a 收窄）；M1b 接入 branch append。
-4. **state.json 校验较浅**：只校验 version/rootSessionId，嵌套字段损坏会在使用处暴露；后续加结构校验。
-5. **子会话工具重复派发**：plan 中 running 任务允许再次 dispatch（用于恢复），但会生成第二个 writer；M1b 加单写者锁。
-6. **自定义 message source**：`longhaul` 作为新 source kind 声明；不带插件的读取方按未知 kind 透传。
-7. **`appendPluginRecord` 的外部调用**：DSH 的 `verify-plugin-record-callers` 仅约束本仓库；外部插件使用处于文档灰色区，记录为 ignorable 并可能被迁移丢弃，权威状态仍是 sidecar。
-8. **预算事件在子 Agent 释放后**：`childRoots` 缓存保证 `subagent/end` 能结算；冷恢复的新子会话依赖 live lineage。
+3. **state.json 校验较浅**：只校验 version/rootSessionId，嵌套字段损坏会在使用处暴露；后续加结构校验。
+4. **子会话工具重复派发**：plan 中 running 任务允许再次 dispatch（用于恢复），但会生成第二个 writer；M1b 加单写者锁。
+5. **自定义 message source**：`longhaul` 作为新 source kind 声明；不带插件的读取方按未知 kind 透传。
+6. **`appendPluginRecord` 的外部调用**：DSH 的 `verify-plugin-record-callers` 仅约束本仓库；外部插件使用处于文档灰色区，记录为 ignorable 并可能被迁移丢弃，权威状态仍是 sidecar。
+7. **预算事件在子 Agent 释放后**：`childRoots` 缓存保证 `subagent/end` 能结算；冷恢复的新子会话依赖 live lineage。
 
 ## 5. 下一步（M1a 收尾 → M1b）
 
 1. 真实会话跑压缩 spike，记录 `compactNow` 的结果与 handoff 顺序。
-2. 子会话 `longhaul_memory`（append-only findings）与 root promote。
-3. 客户端 chip、风险确认、设置页（M1b）。
-4. 模型路由接线（默认仍 inherit，spike 2 后再开）。
+2. 客户端 chip、风险确认、设置页（M1b）。
+3. 模型路由接线（默认仍 inherit，spike 2 后再开）。
+4. 单写者锁与任务恢复策略。

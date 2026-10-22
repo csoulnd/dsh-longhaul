@@ -46,6 +46,8 @@ export interface ToolRuntime {
   save(agent: Agent, state: LonghaulState): Promise<void>
   /** Root session id for a root agent, or undefined for a child. */
   rootOf(agent: Agent): string | undefined
+  /** Root session id for any session in the tree (walks live lineage). */
+  rootSessionOf(agent: Agent): string | undefined
   /** Parent session id for branch ACL walks. */
   parentOf(sessionId: string): string | undefined
   /** Workspace root used to resolve deliverable paths. */
@@ -395,8 +397,9 @@ export function createLonghaulTools(runtime: ToolRuntime): ToolDefinition[] {
       execute: async (args, exec) => {
         if (exec.agent === undefined) fail('longhaul_memory requires an owning agent session')
         const sessionId = String(exec.agent.session.header.id)
-        const root = runtime.rootOf(exec.agent)
-        if (root === undefined) fail('longhaul_memory from a child session is not supported in M1a; use the root session')
+        const root = runtime.rootSessionOf(exec.agent)
+        if (root === undefined) fail('longhaul_memory cannot resolve this session to a Long Haul tree')
+        const isRoot = runtime.rootOf(exec.agent) !== undefined
         const store = runtime.memoryFor(root)
 
         if (args.action === 'append_finding') {
@@ -407,6 +410,7 @@ export function createLonghaulTools(runtime: ToolRuntime): ToolDefinition[] {
             ...(args.evidence === undefined ? {} : { evidence: args.evidence }),
           })
         } else if (args.action === 'append_decision') {
+          if (!isRoot) fail('only the root session may write decisions; append a finding and let the root promote it')
           if (args.text === undefined) fail('append_decision requires text')
           await store.appendDecision(sessionId, {
             text: args.text,
@@ -414,6 +418,7 @@ export function createLonghaulTools(runtime: ToolRuntime): ToolDefinition[] {
             ...(args.evidence === undefined ? {} : { evidence: args.evidence }),
           })
         } else if (args.action === 'promote') {
+          if (!isRoot) fail('only the root session may promote findings into decisions')
           if (args.findingId === undefined) fail('promote requires findingId')
           await store.promote(args.findingId, sessionId, runtime.parentOf, args.text)
         }
