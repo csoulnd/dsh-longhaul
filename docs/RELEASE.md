@@ -52,6 +52,7 @@ dsh plugin --profile desktop remove dsh-longhaul
 ```
 
 - Upgrades are uninstall + install; there is no rollback verb. Keep the previous tarball or pin the prior version.
+- `pwsh -File scripts/verify-install.ps1` performs a snapshot/install/uninstall/compare cycle; it refuses to run while Desktop is open.
 - Uninstalling keeps `~/.dsh/longhaul/<rootSessionId>/` (user memory). Delete it manually to remove memory.
 - If Desktop was running during CLI management, the profile root `cordis.yml` may keep a mirrored `longhaul` row; clean it and the `node_modules/dsh-longhaul` link as described in [M0-REPORT.md](M0-REPORT.md).
 
