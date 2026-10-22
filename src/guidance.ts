@@ -34,6 +34,15 @@ const APPROVAL_SUFFIX: Record<Phase, string> = {
   P3: 'This closes the final gate.',
 }
 
+/** Localized risk statement shown before the mode starts. */
+export const MODE_RISK = {
+  en: 'Starting Long Haul mode creates subagent sessions, spends additional tokens, and submits each stage '
+    + 'deliverable for your approval. Build, commit, push, and publish stay in the parent session. '
+    + 'You can leave the mode at any time.',
+  zh: '开启长任务模式会创建子 Agent、消耗额外 token，并在每个阶段结束时提交交付件等待审批。'
+    + '构建、提交、推送与发布仍由父会话执行。你可以随时退出该模式。',
+} as const
+
 /**
  * Static stage policy injected while the mode is on. Describes the four gates,
  * deliverable requirements, the implementation block before P1 approval, the
