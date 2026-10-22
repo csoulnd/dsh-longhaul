@@ -130,12 +130,14 @@ export function renderBrief(input: BriefInput): string {
  * @param state - current durable state.
  * @param tasks - proposed dispatch tasks.
  * @param config - deployment configuration supplying the fan-out limit.
+ * @param liveSessions - live session ids; a running task owned by one is refused to keep one writer.
  * @returns the first concrete refusal reason, or undefined.
  */
 export function dispatchProblem(
   state: LonghaulState,
   tasks: readonly DispatchTask[],
   config: Config,
+  liveSessions?: ReadonlySet<string>,
 ): string | undefined {
   if (state.mode !== 'on') return 'Long Haul mode is off'
   if (state.phase !== 'P2') {
@@ -148,6 +150,10 @@ export function dispatchProblem(
     if (node === undefined) return `task ${task.id} is not in the approved plan`
     if (node.status !== 'pending' && node.status !== 'running') {
       return `task ${task.id} is ${node.status}; only pending or running tasks can be dispatched`
+    }
+    if (node.status === 'running' && node.ownerSessionId !== undefined
+      && liveSessions !== undefined && liveSessions.has(node.ownerSessionId)) {
+      return `task ${task.id} is already running in session ${node.ownerSessionId}; wait for it to settle`
     }
     if (isTaskPaused(state, task.id)) {
       const change = openChangesForTask(state, task.id)[0]

@@ -277,6 +277,14 @@ describe('dispatchProblem', () => {
     ])
     expect(dispatchProblem(state, [dispatchTask({ id: 't1' })], makeConfig({ fanout: 2 }))).toBeUndefined()
   })
+
+  it('refuses a running task while its owner is live, and allows takeover after it settles', () => {
+    const state = p2State([taskNode({ id: 't1', status: 'running', ownerSessionId: 's1' })])
+    expect(dispatchProblem(state, [dispatchTask({ id: 't1' })], makeConfig({ fanout: 2 }), new Set(['s1'])))
+      .toMatch(/already running in session s1/)
+    expect(dispatchProblem(state, [dispatchTask({ id: 't1' })], makeConfig({ fanout: 2 }), new Set()))
+      .toBeUndefined()
+  })
 })
 
 describe('ownershipConflicts', () => {

@@ -87,7 +87,27 @@ describe('toolDenial', () => {
     })).toMatch(/owned by session child-1/)
   })
 
-  it('never gates its own tools', () => {
+  it('never gates its own tools in the root session', () => {
     expect(toolDenial({ ...base, toolName: 'longhaul_submit', args: {}, state: on('P0') })).toBeUndefined()
+  })
+
+  it('gates root-only tools in a child but leaves memory open', () => {
+    const state = on('P2')
+    expect(toolDenial({
+      ...base,
+      sessionId: 'child-1',
+      isRoot: false,
+      toolName: 'longhaul_dispatch',
+      args: {},
+      state,
+    })).toMatch(/only available in the root session/)
+    expect(toolDenial({
+      ...base,
+      sessionId: 'child-1',
+      isRoot: false,
+      toolName: 'longhaul_memory',
+      args: { action: 'append_finding', text: 'x' },
+      state,
+    })).toBeUndefined()
   })
 })

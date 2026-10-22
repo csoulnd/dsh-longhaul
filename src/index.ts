@@ -294,7 +294,7 @@ export function apply(ctx: Context, config: Config): void {
   async function dispatchTasks(agent: Agent, tasks: readonly DispatchTask[]): Promise<{ taskId: string; childId: string }[]> {
     const root = rootFor(agent)
     const state = await load(agent)
-    const problem = dispatchProblem(state, tasks, settings)
+    const problem = dispatchProblem(state, tasks, settings, new Set(ctx.agents.list().map(agentItem => String(agentItem.session.header.id))))
     if (problem !== undefined) throw new Error(`longhaul: ${problem}`)
     const conflicts = ownershipConflicts(state, tasks)
     if (conflicts.length > 0) throw new Error(`longhaul: ${conflicts.join('; ')}`)

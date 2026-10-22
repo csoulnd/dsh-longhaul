@@ -79,6 +79,9 @@ export function isIntegrationCommand(command: string): boolean {
 export function toolDenial(input: ToolGateInput): string | undefined {
   const state = input.state
   if (state === undefined || state.mode !== 'on') return undefined
+  if (!input.isRoot && input.toolName.startsWith('longhaul_') && input.toolName !== 'longhaul_memory') {
+    return 'Long Haul: this tool is only available in the root session.'
+  }
   if (input.toolName.startsWith('longhaul_')) return undefined
 
   if (WRITE_TOOLS.includes(input.toolName)) {
