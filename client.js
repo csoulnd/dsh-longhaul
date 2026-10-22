@@ -85,7 +85,7 @@ window.__ModuleLoader__.load({
     }
 
     return {
-      inject: ['slots', 'remote', 'remote.commands', 'locale'],
+      inject: ['slots', 'remote.commands', 'locale'],
       apply(ctx) {
         ctx.locale.register(NS, { zh, en })
         ctx.slots.inject('conversation.input.left', () => ctx.slots.register({
