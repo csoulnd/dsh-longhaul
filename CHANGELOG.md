@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.1.0 — unreleased
+
+- Four-gate host core: P0 Requirements → P1 Design → P2 Development → P3 Ship, with a
+  durable state reducer, deliverable section checks, and allowed-once stage approvals.
+- Model tools: `longhaul_status`, `longhaul_plan`, `longhaul_submit`, `longhaul_memory`,
+  `longhaul_change`; plus `/longhaul on|off|status`.
+- Tree memory: append-only sidecar JSONL, tree-wide decisions/artifacts, branch-scoped
+  findings, parent promote, supersession versions.
+- Budget accounting: per-child steps/tokens, tree caps, 80% warn / 100% stop.
+- Phase guidance section, per-turn state context, post-compaction handoff, and
+  design change requests (DCR) with a per-task ceiling.
+- Config schema with D4 defaults and phase model routing (default `inherit`).
+
 ## 0.0.0 — 2026-10-22
 
 - Initial scaffold: Cordis plugin entry, `cordis.patch.yml`, build/typecheck/test

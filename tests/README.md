@@ -1,7 +1,10 @@
 # Tests
 
-M0 has no behavior to test yet. From M1 onward:
+- `unit/` — phase rules, state reducer, memory ACL and JSONL store, budget accounting,
+  configuration validation, guidance text, dispatch policy, brief rendering.
+- `integration/` — real Cordis composition with stub services: tool, section, and command
+  registration plus a `longhaul_status` read through durable state.
+- `e2e/` (planned) — install into a desktop profile, restart, switch the mode, and verify
+  the chip and phase transitions.
 
-- `unit/` — stage machine, memory ACL, budget accounting
-- `integration/` — fake LLM provider + subagent service
-- `e2e/` — install into a profile and switch the mode
+Run with `pnpm test`; `pnpm typecheck` covers `src/` only.

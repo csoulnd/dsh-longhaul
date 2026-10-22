@@ -2,9 +2,13 @@
 
 Long-haul task mode for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness).
 
-A session-scoped mode that works like a person on a long task: **Plan → Analyze → Design → Implement → Test → Ship**, with every stage submitting a deliverable for approval, a tree-scoped memory (`brief` / `decisions` / `findings` / `artifacts`), automatic subagent dispatch under budgets, and a parent-only integration gate.
+A session-scoped mode that works like a person on a long task: **Requirements → Design → Development → Ship**, with every gate submitting a deliverable for approval, a tree-scoped memory (`decisions` / `findings` / `artifacts`), automatic subagent dispatch under budgets, and a parent-only integration gate.
 
-> Status: **M0 research complete, awaiting approval**. The empty bundle installs and uninstalls cleanly; the mode entry, stage machine, memory and budgets land in M1. See [docs/DESIGN.md](docs/DESIGN.md).
+> Status: **M1a host core in progress**. The plugin now provides the four-gate phase machine,
+> `longhaul_*` tools, `/longhaul on|off|status`, durable mode state, tree memory with branch
+> ACL, budget accounting, model guidance, and the design-change loop. Dispatch wiring, phase-exit
+> compaction verification, and the client chip remain. See [docs/DESIGN.md](docs/DESIGN.md) and
+> [docs/M1A-REPORT.md](docs/M1A-REPORT.md).
 
 ## Install (development)
 
@@ -26,13 +30,28 @@ Start Desktop afterwards and confirm the plugin appears in the Plugins page.
 Managing the desktop profile while Desktop is running can leave a mirrored row in
 the profile root `cordis.yml`; see [docs/M0-REPORT.md](docs/M0-REPORT.md).
 
+## Use
+
+```text
+/longhaul on        # enter Long Haul mode for this root session
+/longhaul status    # phase, plan, budget, pending approval
+/longhaul off       # leave the mode; durable state and memory are kept
+```
+
+The model then works through P0 Requirements → P1 Design → P2 Development → P3 Ship.
+Each gate needs a deliverable file and an allowed-once approval (`longhaul_submit`);
+implementation writes stay blocked until P1 is approved. Findings are branch-scoped,
+decisions are tree-wide, and only the root promotes. Design changes raised during
+development go through `longhaul_change` and re-run only the affected tasks.
+
 ## Design
 
 - [docs/HANDOVER.md](docs/HANDOVER.md) — decision record D1–D9, architecture, milestones, risks.
-- [docs/DESIGN.md](docs/DESIGN.md) — M0 answers to the ten research questions and the M1 design supplement.
-- [docs/decisions.md](docs/decisions.md) — decision log (D1–D9 inherited, D10–D18 awaiting approval).
+- [docs/DESIGN.md](docs/DESIGN.md) — M0 research answers, M1 design, and the approved four-gate model.
+- [docs/decisions.md](docs/decisions.md) — decision log (D1–D9 inherited, D10–D23 recorded).
 - [docs/findings/M0-research.md](docs/findings/M0-research.md) — branch-scoped M0 research findings.
 - [docs/M0-REPORT.md](docs/M0-REPORT.md) — install/uninstall commands and evidence.
+- [docs/M1A-REPORT.md](docs/M1A-REPORT.md) — host-core implementation and verification.
 
 ## License
 

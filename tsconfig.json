@@ -8,6 +8,9 @@
     "outDir": "lib",
     "rootDir": "src",
     "skipLibCheck": true,
+    "allowImportingTsExtensions": true,
+    "rewriteRelativeImportExtensions": true,
+    "noUncheckedIndexedAccess": true,
     "types": ["node"]
   },
   "include": ["src"]
