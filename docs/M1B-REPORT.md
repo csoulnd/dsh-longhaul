@@ -27,7 +27,7 @@
 ```text
 node --check client.js       通过
 pnpm typecheck               通过
-pnpm test                    12 files / 101 tests
+pnpm test                    14 files / 107 tests
 pnpm build                   通过
 pnpm pack                    client.js + lib/** + cordis.patch.yml
 真实 lh-test profile         安装成功；--dump-config-schema 接受 dsh.client 清单
@@ -64,13 +64,27 @@ pnpm pack                    client.js + lib/** + cordis.patch.yml
 
 结论：需要**完全退出并重启 Desktop** 做最终视觉验收，而不是刷新页面。如果重启后仍无 chip，用独立 web profile 的 DOM/控制台继续定位。
 
+### 3.4 chip 点击“没反应”的修复
+
+用户反馈重启后 chip 仍在，但点击没有可见反馈。定位为：风险确认面板使用 `position:absolute; bottom:130%` 画在 composer 内，容易被输入区裁剪；看起来像按钮无响应。
+
+修复：
+
+- **chip 点击直接执行** `/longhaul on` / `/longhaul off`，不再自绘浮层；
+- 风险说明移到 host 命令：`/longhaul on` 先调用 `ctx.approval.request({toolName:'longhaul_mode', displayReason:{en,zh}})`，只有 `allowed-once` 才开启；
+- 失败时 chip 旁显示 `!`，`title` 带具体错误；
+- 新增 `tests/integration/client-module.spec.ts`：真实加载 `client.js`、注册 slot、渲染 on/off 两种 chip；
+- 新增 `tests/integration/command.spec.ts`：命令先请求审批、再持久化模式、再注入 notice。
+
+验证：`typecheck` 通过，`test` 107 passed。由于本次为定位问题做过 remove/add，运行中的 Desktop 客户端模块清单没有重新扫描，**需要再次完整重启 Desktop** 才能看到修复后的 chip；host 侧工具已热加载。
+
 ## 4. 已知问题
 
 1. **设置页未做**：预算、扇出、交付件目录目前只能改 `cordis.yml`；M1b 收尾补 `settings.section`。
 2. **projection 依赖 zod 4.4.3**：必须与 DSH 的 zod 版本一致，`4.6.x` 会因类型不兼容失败；已在 `package.json` 固定。
 3. **client.js 手写、无 TS 类型**：换来无需 tsdown；后续若加设置页/复杂交互，再引入构建。
 4. **chip 不区分 root/child**：子会话也可能显示 chip；projection 状态仍来自 root 树。M1b 收尾按 session header 隐藏子会话入口。
-5. **风险确认只在客户端**：CLI 直接执行 `/longhaul on` 不会弹确认；如果该入口需要同等风险提示，需在命令层加一次确认。
+5. **风险确认已移到 host 命令**：CLI 与 chip 使用同一 `longhaul_mode` 审批，不再有“只在客户端确认”的绕过。
 
 ## 5. 下一步
 
