@@ -12,7 +12,7 @@ import type { Agent } from '@deepseek-ai/dsh-agent'
 import { defineTool, type ToolDefinition } from '@deepseek-ai/dsh-tools'
 import type { ApprovalOutcome } from '@deepseek-ai/dsh-user-approval'
 import type { Config } from './config.ts'
-import { deliverableName } from './config.ts'
+import type { DispatchTask } from './dispatch.ts'
 import type { LonghaulMemory } from './memory.ts'
 import {
   changeRequestProblem,
@@ -56,6 +56,8 @@ export interface ToolRuntime {
   notify(agent: Agent, text: string): void
   /** Budget report for the current state. */
   budgetReport(state: LonghaulState): BudgetReport
+  /** Start child sessions for approved tasks; enforces fan-out, phase, DCR, and ownership. */
+  dispatch(agent: Agent, tasks: readonly DispatchTask[]): Promise<{ taskId: string; childId: string }[]>
 }
 
 /** Human-readable status summary shared by the tool result and renderer. */
@@ -294,6 +296,71 @@ export function createLonghaulTools(runtime: ToolRuntime): ToolDefinition[] {
         }
       },
       presentCall: () => ({ card: 'generic', title: 'Submit Long Haul deliverable', kind: 'other' }),
+    }),
+
+    defineTool({
+      name: 'longhaul_dispatch',
+      description: 'Dispatch approved P2 tasks to child sessions. Each child receives a self-contained brief, '
+        + 'its owned files, acceptance commands, the relevant decisions, and a structured-result schema. '
+        + 'The parent keeps integration: children cannot build, commit, push, or publish.',
+      parameters: {
+        tasks: {
+          type: 'array',
+          required: true,
+          description: 'Tasks to start now, each matching an approved plan task.',
+          items: {
+            type: 'object',
+            additionalProperties: false,
+            properties: {
+              id: { type: 'string', required: true },
+              title: { type: 'string', required: true },
+              files: { type: 'array', required: true, items: { type: 'string' } },
+              acceptanceCommands: { type: 'array', required: true, items: { type: 'string' } },
+              notes: { type: 'string' },
+            },
+          },
+        },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            summary: { type: 'string', required: true },
+            started: {
+              type: 'array',
+              required: true,
+              items: {
+                type: 'object',
+                additionalProperties: false,
+                properties: {
+                  taskId: { type: 'string', required: true },
+                  childId: { type: 'string', required: true },
+                },
+              },
+            },
+          },
+        },
+        render: (_args, value) => [{ type: 'text', text: value.summary }],
+      },
+      execute: async (args, exec) => {
+        if (exec.agent === undefined) fail('longhaul_dispatch requires an owning agent session')
+        const tasks: DispatchTask[] = args.tasks.map(task => ({
+          id: task.id,
+          title: task.title,
+          files: task.files,
+          acceptanceCommands: task.acceptanceCommands,
+          ...(task.notes === undefined ? {} : { notes: task.notes }),
+        }))
+        const started = await runtime.dispatch(exec.agent, tasks)
+        return {
+          summary: `Started ${started.length} child session(s): `
+            + started.map(item => `${item.taskId} -> ${item.childId}`).join(', ')
+            + '. Child results arrive as settlement messages; integrate only after they settle.',
+          started,
+        }
+      },
+      presentCall: () => ({ card: 'generic', title: 'Dispatch Long Haul tasks', kind: 'other' }),
     }),
 
     defineTool({

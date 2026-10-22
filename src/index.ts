@@ -18,11 +18,14 @@ import { boundContextSummary, createUserMessage, type ContextFormed } from '@dee
 import { appendPluginRecord } from '@deepseek-ai/dsh-session'
 import type { Session } from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-system-prompt'
-import type {} from '@deepseek-ai/dsh-tools'
+import type { ObjectJsonSchema } from '@deepseek-ai/dsh-tools'
+import type { SubagentActivation } from '@deepseek-ai/dsh-subagent'
 import type { ApprovalOutcome } from '@deepseek-ai/dsh-user-approval'
 import { evaluateBudget } from './budget.ts'
-import type { BudgetReport, LonghaulState, StageHandoff } from './types.ts'
+import type { BudgetReport, ChildReport, LonghaulState, StageHandoff, StateEvent } from './types.ts'
 import { Config, resolveConfig } from './config.ts'
+import { dispatchProblem, ownershipConflicts, renderBrief, type DispatchTask } from './dispatch.ts'
+import { toolDenial } from './guard.ts'
 import { handoffText, modeNotice, policyText, stateContext } from './guidance.ts'
 import { LonghaulMemory } from './memory.ts'
 import { deliverablePath } from './phases.ts'
@@ -44,6 +47,20 @@ export const name = 'longhaul'
 
 /** Services the plugin cannot work without. */
 export const inject = ['agents', 'tools', 'systemPrompt']
+
+/** Structured result every child session must return through `structured_output`. */
+const CHILD_OUTPUT_SCHEMA: ObjectJsonSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['summary', 'files', 'tests', 'blockers', 'evidence'],
+  properties: {
+    summary: { type: 'string' },
+    files: { type: 'array', items: { type: 'string' } },
+    tests: { type: 'array', items: { type: 'string' } },
+    blockers: { type: 'array', items: { type: 'string' } },
+    evidence: { type: 'array', items: { type: 'string' } },
+  },
+}
 
 /** Durable artifact root under the harness home. */
 function longhaulHome(): string {
@@ -87,6 +104,11 @@ function rootOf(agent: Agent): string | undefined {
 export function apply(ctx: Context, config: Config): void {
   const settings = resolveConfig(config)
   const states = new Map<string, LonghaulState>()
+  const activations = new Map<string, SubagentActivation>()
+  const childRoots = new Map<string, string>()
+  const warned = new Set<string>()
+  const dirty = new Set<string>()
+  let flushTimer: NodeJS.Timeout | undefined
   const memoryFor = (rootSessionId: string): LonghaulMemory =>
     new LonghaulMemory({ baseDir: longhaulHome(), rootSessionId })
 
@@ -106,8 +128,23 @@ export function apply(ctx: Context, config: Config): void {
     return undefined
   }
 
-  const load = async (agent: Agent): Promise<LonghaulState> => {
-    const root = rootFor(agent)
+  const agentFor = (sessionId: string): Agent | undefined =>
+    ctx.agents.list().find(agent => String(agent.session.header.id) === sessionId)
+
+  /** Walk the live lineage to the root session; undefined on a cycle. */
+  const sessionRoot = (sessionId: string): string | undefined => {
+    let current = sessionId
+    const seen = new Set<string>()
+    for (;;) {
+      if (seen.has(current)) return undefined
+      seen.add(current)
+      const parent = parentOf(current)
+      if (parent === undefined) return current
+      current = parent
+    }
+  }
+
+  const load = async (agent: Agent): Promise<LonghaulState> => {    const root = rootFor(agent)
     const cached = states.get(root)
     if (cached !== undefined) return cached
     let state: LonghaulState
@@ -121,7 +158,7 @@ export function apply(ctx: Context, config: Config): void {
     return state
   }
 
-  const persist = async (agent: Agent, state: LonghaulState): Promise<void> => {
+  const persist = async (agent: Agent, state: LonghaulState, record = true): Promise<void> => {
     const root = state.rootSessionId
     states.set(root, state)
     const path = statePath(root)
@@ -129,6 +166,7 @@ export function apply(ctx: Context, config: Config): void {
     const temporary = `${path}.tmp`
     await writeFile(temporary, `${JSON.stringify(state, undefined, 2)}\n`, 'utf8')
     await rename(temporary, path)
+    if (!record) return
     try {
       appendPluginRecord(agent.session, 'plugin:longhaul/state', {
         mode: state.mode,
@@ -165,6 +203,73 @@ export function apply(ctx: Context, config: Config): void {
     }))
   }
 
+  const flushBudgets = async (): Promise<void> => {
+    flushTimer = undefined
+    const roots = [...dirty]
+    dirty.clear()
+    for (const root of roots) {
+      const state = states.get(root)
+      const agent = agentFor(root)
+      if (state === undefined || agent === undefined) continue
+      try {
+        await persist(agent, state, false)
+      } catch (error) {
+        ctx.logger.warn(`longhaul: budget state for ${root} was not saved: ${String(error)}`)
+      }
+    }
+  }
+
+  const markDirty = (root: string): void => {
+    dirty.add(root)
+    if (flushTimer !== undefined) return
+    flushTimer = setTimeout(() => { void flushBudgets() }, 200)
+    flushTimer.unref()
+  }
+
+  /** Apply one observation to the tree budget, then enforce warn/stop. */
+  const applyBudget = (root: string, event: StateEvent): void => {
+    const state = states.get(root)
+    if (state === undefined || state.mode !== 'on') return
+    let next: LonghaulState
+    try {
+      next = reduce(state, event)
+    } catch (error) {
+      ctx.logger.warn(`longhaul: ignored invalid budget event: ${String(error)}`)
+      return
+    }
+    if (next === state) return
+    states.set(root, next)
+    markDirty(root)
+
+    const report = budgetReport(next)
+    const rootAgent = agentFor(root)
+    for (const [childId, verdict] of Object.entries(report.verdicts)) {
+      if (verdict === 'warn' && !warned.has(childId)) {
+        warned.add(childId)
+        const activation = activations.get(childId)
+        const subagents = ctx.get('subagents')
+        if (activation !== undefined && subagents !== undefined && rootAgent !== undefined) {
+          void subagents.sendMessage(rootAgent, activation.childId, [{
+            type: 'text',
+            text: 'Long Haul budget: you have used 80% of your step or token budget. '
+              + 'Finish the task, record evidence, and return a structured result now.',
+          }], { signal: new AbortController().signal }).catch((error: unknown) => {
+            ctx.logger.warn(`longhaul: budget warning to ${childId} failed: ${String(error)}`)
+          })
+        }
+      }
+      if (verdict === 'stop' && !warned.has(`stop:${childId}`)) {
+        warned.add(`stop:${childId}`)
+        const activation = activations.get(childId)
+        if (activation !== undefined) void activation.dispose().catch((error: unknown) => {
+          ctx.logger.warn(`longhaul: budget stop for ${childId} failed: ${String(error)}`)
+        })
+        else agentFor(childId)?.cancel({ kind: 'parent' })
+        if (rootAgent !== undefined) notify(rootAgent, `Long Haul budget exhausted for child ${childId}; it was stopped.`)
+      }
+    }
+  }
+
   const runtime: ToolRuntime = {
     config: settings,
     memoryFor,
@@ -176,6 +281,80 @@ export function apply(ctx: Context, config: Config): void {
     approve,
     notify,
     budgetReport,
+    dispatch: async (agent, tasks) => dispatchTasks(agent, tasks),
+  }
+
+  /** Start one child per task; the parent owns integration and the result merge. */
+  async function dispatchTasks(agent: Agent, tasks: readonly DispatchTask[]): Promise<{ taskId: string; childId: string }[]> {
+    const root = rootFor(agent)
+    const state = await load(agent)
+    const problem = dispatchProblem(state, tasks, settings)
+    if (problem !== undefined) throw new Error(`longhaul: ${problem}`)
+    const conflicts = ownershipConflicts(state, tasks)
+    if (conflicts.length > 0) throw new Error(`longhaul: ${conflicts.join('; ')}`)
+    const subagents = ctx.get('subagents')
+    if (subagents === undefined) throw new Error('longhaul: dispatch needs the subagent service')
+    const memory = memoryFor(root)
+    const decisions = await memory.listDecisions()
+    const findings = await memory.listFindings(String(agent.session.header.id), parentOf)
+    const route = settings.modelPolicy.mode === 'phase' ? settings.modelPolicy.phases.P2 : undefined
+    let current = state
+    const started: { taskId: string; childId: string }[] = []
+    for (const task of tasks) {
+      const planTask = current.plan?.tasks.find(candidate => candidate.id === task.id)
+      if (planTask === undefined) throw new Error(`longhaul: task ${task.id} is not in the approved plan`)
+      const activation = await subagents.startActivation({
+        provider: 'spawn',
+        label: `longhaul:${task.id}`,
+        request: {
+          parent: agent,
+          prompt: [{ type: 'text', text: renderBrief({ task, state: current, config: settings, decisions, findings }) }],
+          ...(agent.session.header.cwd === undefined ? {} : { cwd: agent.session.header.cwd }),
+          outputSchema: CHILD_OUTPUT_SCHEMA,
+          maxDepth: settings.maxDepth,
+          ...(route === undefined ? {} : { agentOptions: { provider: route.provider, model: route.model } }),
+        },
+        signal: new AbortController().signal,
+        delivery: 'parent',
+      })
+      const childId = String(activation.childId)
+      activations.set(childId, activation)
+      childRoots.set(childId, root)
+      started.push({ taskId: task.id, childId })
+      current = reduce(current, {
+        type: 'task/update',
+        at: Date.now(),
+        task: { ...planTask, status: 'running', ownerSessionId: childId },
+      })
+      void activation.result.then((result) => {
+        const report = result.structured as ChildReport | undefined
+        const blocked = (report !== undefined && report.blockers.length > 0) || result.stopReason !== 'completed'
+        const latest = states.get(root) ?? current
+        const latestTask = latest.plan?.tasks.find(candidate => candidate.id === task.id)
+        if (latestTask === undefined) return
+        void persist(agent, reduce(latest, {
+          type: 'task/update',
+          at: Date.now(),
+          task: { ...latestTask, status: blocked ? 'blocked' : 'done' },
+        })).catch((error: unknown) => {
+          ctx.logger.warn(`longhaul: task ${task.id} settlement was not saved: ${String(error)}`)
+        })
+      }).catch((error: unknown) => {
+        ctx.logger.warn(`longhaul: child ${childId} failed: ${String(error)}`)
+        const latest = states.get(root) ?? current
+        const latestTask = latest.plan?.tasks.find(candidate => candidate.id === task.id)
+        if (latestTask !== undefined) {
+          void persist(agent, reduce(latest, {
+            type: 'task/update',
+            at: Date.now(),
+            task: { ...latestTask, status: 'blocked' },
+          }), false).catch(() => {})
+        }
+      })
+    }
+    await persist(agent, current)
+    markDirty(root)
+    return started
   }
 
   // Guidance: stable policy prose plus a compact per-turn state block.
@@ -264,12 +443,73 @@ export function apply(ctx: Context, config: Config): void {
   ctx.on('session/created', (session: Session) => { ensure(session) })
   for (const agent of ctx.agents.list()) ensure(agent.session)
 
+  // Tool gate: phase writes, child integration commands, and file ownership.
+  ctx.on('tools/pre-execute', async (exec, next) => {
+    if (exec.agent === undefined) return next()
+    const sessionId = String(exec.agent.session.header.id)
+    const root = childRoots.get(sessionId) ?? sessionRoot(sessionId)
+    let state = root === undefined ? undefined : states.get(root)
+    if (root !== undefined && state === undefined) {
+      const rootAgent = agentFor(root)
+      if (rootAgent !== undefined) {
+        state = await load(rootAgent).catch(() => undefined)
+      }
+    }
+    const denial = toolDenial({
+      toolName: exec.name,
+      args: exec.arguments,
+      sessionId,
+      isRoot: root === sessionId,
+      cwd: exec.agent.session.header.cwd ?? process.cwd(),
+      deliverableDir: settings.deliverableDir,
+      state,
+    })
+    return denial === undefined ? next() : { kind: 'deny', reason: denial }
+  })
+
+  // Child budget lifecycle follows the subagent lifecycle pair.
+  ctx.on('subagent/start', (info) => {
+    const childId = String(info.id)
+    const root = sessionRoot(childId)
+    if (root === undefined || root === childId) return
+    childRoots.set(childId, root)
+    const state = states.get(root)
+    if (state === undefined || state.mode !== 'on') return
+    applyBudget(root, { type: 'budget/start', at: Date.now(), sessionId: childId, phase: state.phase })
+  })
+  ctx.on('subagent/end', (info) => {
+    const childId = String(info.id)
+    const root = childRoots.get(childId) ?? sessionRoot(childId)
+    if (root === undefined || root === childId) return
+    applyBudget(root, { type: 'budget/finish', at: Date.now(), sessionId: childId })
+    void flushBudgets()
+  })
+
   // Phase-exit compaction: run once the agent is idle, then leave a handoff.
   ctx.on('session/event', (session: Session, event) => {
+    const sessionId = String(session.header.id)
+    const root = childRoots.get(sessionId) ?? sessionRoot(sessionId)
+    if (root !== undefined && root !== sessionId) {
+      if (event.type === 'step/start') {
+        applyBudget(root, { type: 'budget/step', at: Date.now(), sessionId })
+      } else if (event.type === 'assistant/message' && event.data.usage !== undefined) {
+        applyBudget(root, {
+          type: 'budget/usage',
+          at: Date.now(),
+          sessionId,
+          usage: {
+            inputTokens: event.data.usage.inputTokens,
+            outputTokens: event.data.usage.outputTokens,
+            cacheReadTokens: event.data.usage.cacheReadTokens ?? 0,
+          },
+        })
+      } else if (event.type === 'turn/end') {
+        void flushBudgets()
+      }
+    }
     if (event.type !== 'turn/end') return
     if (session.header.parentSession !== undefined) return
-    const root = String(session.header.id)
-    const state = states.get(root)
+    const state = states.get(root ?? sessionId)
     if (state === undefined || !state.compactPending || !settings.compactOnPhaseExit) return
     const agent = ctx.agents.get(session.header.id)
     if (agent === undefined) return

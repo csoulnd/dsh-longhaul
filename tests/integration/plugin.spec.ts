@@ -65,6 +65,7 @@ describe('plugin composition', () => {
     expect(inject).toEqual(['agents', 'tools', 'systemPrompt'])
     expect(tools.map(tool => tool.name).sort()).toEqual([
       'longhaul_change',
+      'longhaul_dispatch',
       'longhaul_memory',
       'longhaul_plan',
       'longhaul_status',

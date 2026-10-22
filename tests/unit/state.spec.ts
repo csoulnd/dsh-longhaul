@@ -143,3 +143,33 @@ describe('compaction flag', () => {
     expect(reduce(pending, { type: 'compact/done', at: 4 }).compactPending).toBe(false)
   })
 })
+
+describe('budget observations', () => {
+  it('starts, counts steps and usage, and keeps totals after finish', () => {
+    const on = reduce(initialState('root', 1), { type: 'mode/on', at: 2 })
+    const started = reduce(on, { type: 'budget/start', at: 3, sessionId: 'child', phase: 'P2' })
+    expect(started.budget.children.child?.steps).toBe(0)
+
+    const stepped = reduce(started, { type: 'budget/step', at: 4, sessionId: 'child' })
+    const used = reduce(stepped, {
+      type: 'budget/usage',
+      at: 5,
+      sessionId: 'child',
+      usage: { inputTokens: 10, outputTokens: 4, cacheReadTokens: 2 },
+    })
+    expect(used.budget.total).toEqual({ steps: 1, inputTokens: 10, outputTokens: 4, cacheReadTokens: 2 })
+
+    const finished = reduce(used, { type: 'budget/finish', at: 6, sessionId: 'child' })
+    expect(finished.budget.children.child).toBeUndefined()
+    expect(finished.budget.total.steps).toBe(1)
+    expect(finished.budget.total.inputTokens).toBe(10)
+  })
+
+  it('ignores observations for unknown or duplicate children', () => {
+    const on = reduce(initialState('root', 1), { type: 'mode/on', at: 2 })
+    const stepped = reduce(on, { type: 'budget/step', at: 3, sessionId: 'missing' })
+    expect(stepped).toBe(on)
+    const started = reduce(on, { type: 'budget/start', at: 4, sessionId: 'child', phase: 'P2' })
+    expect(reduce(started, { type: 'budget/start', at: 5, sessionId: 'child', phase: 'P2' })).toBe(started)
+  })
+})

@@ -4,10 +4,12 @@ Long-haul task mode for [DeepSeek Harness](https://github.com/deepseek-ai/deepse
 
 A session-scoped mode that works like a person on a long task: **Requirements → Design → Development → Ship**, with every gate submitting a deliverable for approval, a tree-scoped memory (`decisions` / `findings` / `artifacts`), automatic subagent dispatch under budgets, and a parent-only integration gate.
 
-> Status: **M1a host core in progress**. The plugin now provides the four-gate phase machine,
-> `longhaul_*` tools, `/longhaul on|off|status`, durable mode state, tree memory with branch
-> ACL, budget accounting, model guidance, and the design-change loop. Dispatch wiring, phase-exit
-> compaction verification, and the client chip remain. See [docs/DESIGN.md](docs/DESIGN.md) and
+> Status: **M1a host core complete**. The plugin provides the four-gate phase machine,
+> `longhaul_*` tools (status/plan/submit/dispatch/memory/change), `/longhaul on|off|status`,
+> durable mode state, tree memory with branch ACL, budget accounting and stop rules,
+> subagent dispatch with structured briefs, tool-phase/ownership gates, model guidance,
+> and the design-change loop. Phase-exit compaction measurement, child memory, model
+> routing, and the client chip remain. See [docs/DESIGN.md](docs/DESIGN.md) and
 > [docs/M1A-REPORT.md](docs/M1A-REPORT.md).
 
 ## Install (development)

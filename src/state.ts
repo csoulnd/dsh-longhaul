@@ -5,6 +5,7 @@
  *
  * @module dsh-longhaul/state
  */
+import { finishChild, recordStep, recordUsage, startChild } from './budget.ts'
 import { nextPhase } from './phases.ts'
 import type { LonghaulState, StateEvent, TaskNode } from './types.ts'
 
@@ -113,6 +114,26 @@ export function reduce(state: LonghaulState, event: StateEvent): LonghaulState {
         fileOwners: ownersOf(tasks),
         updatedAt: event.at,
       }
+    }
+    case 'budget/start': {
+      if (state.budget.children[event.sessionId] !== undefined) return state
+      return {
+        ...state,
+        budget: startChild(state.budget, event.sessionId, event.phase, event.at),
+        updatedAt: event.at,
+      }
+    }
+    case 'budget/step': {
+      if (state.budget.children[event.sessionId] === undefined) return state
+      return { ...state, budget: recordStep(state.budget, event.sessionId), updatedAt: event.at }
+    }
+    case 'budget/usage': {
+      if (state.budget.children[event.sessionId] === undefined) return state
+      return { ...state, budget: recordUsage(state.budget, event.sessionId, event.usage), updatedAt: event.at }
+    }
+    case 'budget/finish': {
+      if (state.budget.children[event.sessionId] === undefined) return state
+      return { ...state, budget: finishChild(state.budget, event.sessionId), updatedAt: event.at }
     }
     case 'compact/pending':
       return { ...state, compactPending: true, updatedAt: event.at }

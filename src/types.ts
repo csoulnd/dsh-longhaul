@@ -173,6 +173,15 @@ export type StateEvent =
   | { type: 'change/request'; at: number; request: DesignChangeRequest }
   | { type: 'change/decide'; at: number; id: string; approved: boolean }
   | { type: 'task/update'; at: number; task: TaskNode }
+  | { type: 'budget/start'; at: number; sessionId: string; phase: Phase }
+  | { type: 'budget/step'; at: number; sessionId: string }
+  | {
+    type: 'budget/usage'
+    at: number
+    sessionId: string
+    usage: Partial<Pick<UsageCounters, 'inputTokens' | 'outputTokens' | 'cacheReadTokens'>>
+  }
+  | { type: 'budget/finish'; at: number; sessionId: string }
   | { type: 'compact/pending'; at: number }
   | { type: 'compact/done'; at: number }
 
@@ -194,6 +203,15 @@ export interface StageHandoff {
   acceptanceCommands: string[]
   budgetRemaining: number | undefined
   designVersion: number
+}
+
+/** Structured result a child session returns to the parent. */
+export interface ChildReport {
+  summary: string
+  files: string[]
+  tests: string[]
+  blockers: string[]
+  evidence: string[]
 }
 
 declare module '@deepseek-ai/dsh-session/types' {
