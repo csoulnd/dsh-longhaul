@@ -41,6 +41,17 @@ node import      exports: Config, apply, inject, name; name=longhaul
 - `guard.spec.ts` 9：交付件路径、集成命令、阶段写门禁、归属拒绝。
 - `tools.spec.ts` 4：dispatch 参数整形、拒绝传播、status 报告、子会话记忆 ACL。
 - `integration/compaction.spec.ts` 1：真实 Session + Cordis 事件总线 + 假压缩后端；验证 `turn/end` 触发一次 `compactNow`，且 handoff 在压缩之后注入、状态落盘为 `compactPending=false`。
+
+真实 profile 组合（临时 `lh-test`，测完删除）：
+
+```text
+dsh --profile lh-test --from-default-profile web --dump-config   # 初始化
+dsh plugin --profile lh-test add C:\data\project\dsh-longhaul    # exit 0
+dsh --profile lh-test --dump-config                              # 末尾出现 "# == dsh-longhaul / - id: longhaul / name: dsh-longhaul"
+dsh --profile lh-test --dump-config-schema                       # 导入插件并读出 Config schema（default ".longhaul"）
+```
+
+`--dump-config-schema` 的总退出码为 1，原因是该 profile 里既有的 “unrecognized Loader tree carrier” 警告（与本插件无关）；`longhaul` 的 Config 与 entry 均已出现在 schema 中，说明 bundle patch、模块解析和 Config 导出在真实 Loader 下成立。
 - `integration/plugin.spec.ts` 2：真实 Cordis 组合下注册 6 个工具、section、命令；status 读盘。
 
 ## 3. 已实现的验收点（对照 DESIGN §5）
