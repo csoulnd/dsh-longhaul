@@ -15,6 +15,8 @@
 - Budget accounting: per-child steps/tokens, tree caps, 80% warn / 100% stop.
 - Phase guidance section, per-turn state context, post-compaction handoff, and
   design change requests (DCR) with a per-task ceiling.
+- Client entry: composer `Long Haul` chip, bilingual labels, first-enable risk
+  confirmation, and a `longhaul` session projection for live phase state.
 - Config schema with D4 defaults and phase model routing (default `inherit`).
 
 ## 0.0.0 — 2026-10-22

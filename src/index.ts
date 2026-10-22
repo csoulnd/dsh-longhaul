@@ -19,6 +19,7 @@ import { appendPluginRecord } from '@deepseek-ai/dsh-session'
 import type { Session } from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-system-prompt'
 import type { ObjectJsonSchema } from '@deepseek-ai/dsh-tools'
+import type {} from '@deepseek-ai/dsh-session-projection'
 import type { SubagentActivation } from '@deepseek-ai/dsh-subagent'
 import type { ApprovalOutcome } from '@deepseek-ai/dsh-user-approval'
 import { evaluateBudget } from './budget.ts'
@@ -29,6 +30,7 @@ import { toolDenial } from './guard.ts'
 import { handoffText, modeNotice, policyText, stateContext } from './guidance.ts'
 import { LonghaulMemory } from './memory.ts'
 import { deliverablePath } from './phases.ts'
+import { longhaulProjection } from './projection.ts'
 import { initialState, reduce } from './state.ts'
 import { createLonghaulTools, type ToolRuntime } from './tools.ts'
 
@@ -172,6 +174,9 @@ export function apply(ctx: Context, config: Config): void {
         mode: state.mode,
         phase: state.phase,
         designVersion: state.designVersion,
+        taskCount: state.plan?.tasks.length ?? 0,
+        pending: state.pendingApproval?.phase ?? '',
+        steps: state.budget.total.steps,
         updatedAt: state.updatedAt,
       })
     } catch (error) {
@@ -386,6 +391,11 @@ export function apply(ctx: Context, config: Config): void {
   for (const tool of createLonghaulTools(runtime)) {
     ctx.effect(() => ctx.tools.register(tool), `longhaul tool ${tool.name}`)
   }
+
+  // Client chip state: fold our durable state records into a wire projection.
+  ctx.inject(['sessionProjections'], (projectionCtx) => {
+    projectionCtx.sessionProjections.register(longhaulProjection)
+  })
 
   // `/longhaul on|off|status` keeps the host usable without the client half.
   ctx.inject(['commands'], (commandCtx) => {

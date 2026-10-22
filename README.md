@@ -4,13 +4,14 @@ Long-haul task mode for [DeepSeek Harness](https://github.com/deepseek-ai/deepse
 
 A session-scoped mode that works like a person on a long task: **Requirements → Design → Development → Ship**, with every gate submitting a deliverable for approval, a tree-scoped memory (`decisions` / `findings` / `artifacts`), automatic subagent dispatch under budgets, and a parent-only integration gate.
 
-> Status: **M1a host core complete**. The plugin provides the four-gate phase machine,
+> Status: **M1 host + client entry**. The plugin provides the four-gate phase machine,
 > `longhaul_*` tools (status/plan/submit/dispatch/memory/change), `/longhaul on|off|status`,
-> durable mode state, tree memory with branch ACL, budget accounting and stop rules,
-> subagent dispatch with structured briefs, tool-phase/ownership gates, model guidance,
-> and the design-change loop. Phase-exit compaction measurement, child memory, model
-> routing, and the client chip remain. See [docs/DESIGN.md](docs/DESIGN.md) and
-> [docs/M1A-REPORT.md](docs/M1A-REPORT.md).
+> a composer `Long Haul` chip with the first-enable risk confirmation, durable mode state,
+> tree memory with branch ACL, budget accounting and stop rules, subagent dispatch with
+> structured briefs, tool-phase/ownership gates, model guidance, and the design-change loop.
+> The settings page, real-session compaction measurement, child model routing, and Desktop
+> visual acceptance remain. See [docs/DESIGN.md](docs/DESIGN.md), [docs/M1A-REPORT.md](docs/M1A-REPORT.md),
+> and [docs/M1B-REPORT.md](docs/M1B-REPORT.md).
 
 ## Install (development)
 
@@ -54,6 +55,7 @@ development go through `longhaul_change` and re-run only the affected tasks.
 - [docs/findings/M0-research.md](docs/findings/M0-research.md) — branch-scoped M0 research findings.
 - [docs/M0-REPORT.md](docs/M0-REPORT.md) — install/uninstall commands and evidence.
 - [docs/M1A-REPORT.md](docs/M1A-REPORT.md) — host-core implementation and verification.
+- [docs/M1B-REPORT.md](docs/M1B-REPORT.md) — composer chip, risk confirmation, and projection.
 
 ## License
 

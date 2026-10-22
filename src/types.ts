@@ -221,6 +221,9 @@ declare module '@deepseek-ai/dsh-session/types' {
       mode: Mode
       phase: Phase
       designVersion: number
+      taskCount: number
+      pending: string
+      steps: number
       updatedAt: number
     }
   }
