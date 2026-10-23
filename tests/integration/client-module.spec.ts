@@ -67,7 +67,7 @@ function chipOf(view: { mode: string; phase: string }, draft = ''): {
   const tree = component({
     t: (key: string) => key,
     useProjection: () => view,
-    useInput: () => ({ draft }),
+    useInput: (selector: (state: { draft: string }) => unknown) => selector({ draft }),
     inputActions: {
       setDraft: (text: string) => { calls.push(`draft:${text}`) },
       submit: () => { calls.push('submit') },

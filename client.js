@@ -48,7 +48,7 @@ window.__ModuleLoader__.load({
       const view = props.useProjection('longhaul')
       const mode = view === undefined ? 'off' : view.mode
       const phase = view === undefined ? 'P0' : view.phase
-      const input = typeof props.useInput === 'function' ? props.useInput() : undefined
+      const draft = typeof props.useInput === 'function' ? props.useInput(state => state.draft) : ''
       const actions = props.inputActions
       const [failed, setFailed] = React.useState(null)
       const t = props.t
@@ -58,8 +58,7 @@ window.__ModuleLoader__.load({
           setFailed(t('chip.failed'))
           return
         }
-        const draft = input === undefined ? '' : input.draft
-        if (draft.trim() !== '') {
+        if (draft !== undefined && draft.trim() !== '') {
           setFailed(t('chip.draft'))
           return
         }
@@ -90,8 +89,8 @@ window.__ModuleLoader__.load({
       inject: ['slots', 'locale'],
       apply(ctx) {
         ctx.locale.register(NS, { zh, en })
-        ctx.slots.inject('conversation.composer.dock', () => ctx.slots.register({
-          name: 'conversation.composer.dock',
+        ctx.slots.inject('conversation.input.left', () => ctx.slots.register({
+          name: 'conversation.input.left',
           id: 'dsh-longhaul',
           order: 20,
           locale: NS,

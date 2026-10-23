@@ -76,7 +76,37 @@ pnpm pack                    client.js + lib/** + cordis.patch.yml
 - 新增 `tests/integration/client-module.spec.ts`：加载 `client.js`、渲染 on/off、验证点击写入 `/longhaul on|off` 并 submit、验证草稿保护；
 - 新增 `tests/integration/command.spec.ts`：命令先请求审批、再持久化模式、再注入 notice。
 
-验证：`typecheck` 通过，`test` 109 passed；新 bundle 在临时 web profile 中确认包含 `inputActions` 与 `/longhaul on`。运行中的 Desktop 仍持有更早的客户端 bundle 缓存，**需要最后一次完整重启**才能看到修复后的 chip；host 侧工具与命令已可用。
+### 3.5 真正导致 chip 消失的错误（CDP 定位）
+
+用 Edge 的 `--remote-debugging-port` 打开同一 web profile，抓到浏览器控制台：
+
+```text
+slot entry crashed in 'conversation.input.left': TypeError: selector is not a function
+    at memoizedSelector
+```
+
+根因：`props.useInput` 是 **selector hook**，签名是 `useInput(selector)`；代码把它当成无参 getter 调用 `props.useInput()`，composer 槽位渲染直接抛错，整条 slot entry 被错误边界吞掉，所以 chip 消失。
+
+修复：
+
+```js
+const draft = typeof props.useInput === 'function' ? props.useInput(state => state.draft) : ''
+```
+
+同时把 `dsh.client.inject` 对齐到已验证的第三方插件 `dsh-better-sidebar`：
+`["@deepseek-ai/dsh-client-locale","@deepseek-ai/dsh-client-ui-slots","@deepseek-ai/dsh-client-ui-conversation","@deepseek-ai/dsh-client-modules"]`，并移除非模板字段 `immediately`。
+
+验证：`test` 109 passed；新 bundle 在临时 web profile 中确认包含 `inputActions` 与 `/longhaul on`。由于修复的是客户端 JS，Desktop 需要一次完整重启加载新 bundle；host 侧工具与命令始终可用。
+
+### 3.6 什么是“完全退出”
+
+Desktop 关窗口可能只是收进托盘。完全退出任选一种：
+
+1. 托盘图标右键 → 退出 / Quit（不是关闭窗口）；
+2. 任务管理器 → 结束所有 `DeepSeek Harness` 进程；
+3. 退出后确认没有 `DeepSeek Harness.exe` 残留，再重新打开。
+
+本次问题不是没退干净：端口从 57945 → 52528 已证明 host 重启；真正原因是上面的客户端 selector 错误。
 
 ## 4. 已知问题
 
