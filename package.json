@@ -13,7 +13,7 @@
     "./locale/*.json": "./locale/*.json",
     "./package.json": "./package.json"
   },
-  "files": ["lib", "client.js", "cordis.patch.yml", "locale/*.json", "README.md", "LICENSE"],
+  "files": ["lib", "client.js", "cordis.patch.yml", "locale/*.json", "README.md", "README.zh-CN.md", "LICENSE"],
   "dsh": {
     "manifestVersion": 1,
     "bundle": { "patch": "./cordis.patch.yml" },

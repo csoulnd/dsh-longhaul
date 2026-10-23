@@ -1,16 +1,18 @@
 # Release checklist
 
+[English](RELEASE.md) | [简体中文](RELEASE.zh-CN.md)
+
 > Version: `0.1.0` · License: MIT · Package: `dsh-longhaul` · Repository: `csoulnd/dsh-longhaul`
 
 ## 1. Preconditions
 
 - [x] `pnpm typecheck` exit 0
-- [x] `pnpm test` exit 0 (12 files / 103 tests)
+- [x] `pnpm test` exit 0 (14 files / 110 tests)
 - [x] `pnpm build` exit 0 (`lib/*.js`, `lib/*.d.ts`)
 - [x] `pnpm pack --dry-run` includes `lib/`, `client.js`, `cordis.patch.yml`, `locale/*.json`
 - [x] Temporary profile install + `--dump-config` shows the `longhaul` row
 - [x] `--dump-config-schema` imports the plugin and reads its Config
-- [ ] Real Desktop visual acceptance: chip, risk panel, projection updates
+- [x] Real Desktop acceptance: chip, native risk confirmation, mode on/off notices
 - [ ] Real-session compaction backend check (`compaction-basic`, not the fake backend used in tests)
 - [ ] CI green on Node 22 and 24 after the release commit
 
@@ -66,3 +68,4 @@ dsh plugin --profile desktop remove dsh-longhaul
 6. **Memory is sidecar-authoritative**: session plugin records are audit anchors and can be lost by a format migration; `~/.dsh/longhaul` remains the source of truth.
 7. **File ownership is cooperative**: cross-session writes are refused by the tool gate, but DSH has no cross-session filesystem lock; direct filesystem writes from a child are out of scope.
 8. **Windows-first validation**: the install/verify path was exercised on Windows; Linux/macOS are covered by CI unit tests only.
+9. **Risk confirmation is client-owned**: the composer chip confirms with a native dialog; a direct CLI `/longhaul on` does not prompt. The stage gates themselves still ask for approval.

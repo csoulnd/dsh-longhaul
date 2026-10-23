@@ -1,16 +1,19 @@
 # dsh-longhaul
 
+[English](README.md) | [简体中文](README.zh-CN.md)
+
 Long-haul task mode for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness).
 
 A session-scoped mode that works like a person on a long task: **Requirements → Design → Development → Ship**, with every gate submitting a deliverable for approval, a tree-scoped memory (`decisions` / `findings` / `artifacts`), automatic subagent dispatch under budgets, and a parent-only integration gate.
 
-> Status: **M1–M4 implemented; M5 release preparation complete**. The plugin provides the
-> four-gate phase machine, `longhaul_*` tools (status/plan/submit/dispatch/memory/change),
-> `/longhaul on|off|status`, a composer `Long Haul` chip with the first-enable risk
-> confirmation, durable mode state, tree memory with branch ACL, budget accounting and stop
-> rules, subagent dispatch with structured briefs, tool-phase/ownership gates, model guidance,
-> and the design-change loop. Remaining before `npm publish`: a real Desktop visual acceptance,
-> a real-session compaction check, and the settings page. See [docs/RELEASE.md](docs/RELEASE.md).
+> Status: **0.1.0 release candidate**. The plugin provides the four-gate phase machine,
+> `longhaul_*` tools (status/plan/submit/dispatch/memory/change), `/longhaul on|off|status`,
+> a composer `Long Haul` chip with native risk confirmation, durable mode state, tree memory
+> with branch ACL, budget accounting and stop rules, subagent dispatch with structured
+> briefs, tool-phase/ownership gates, model guidance, and the design-change loop.
+> The chip and mode on/off are accepted in the real Desktop; `typecheck`, 110 tests, and
+> `build` pass. Remaining before `npm publish`: the settings page, a real-session
+> compaction check, and the release/CI run. See [docs/RELEASE.md](docs/RELEASE.md).
 
 ## Install (development)
 
@@ -57,6 +60,7 @@ development go through `longhaul_change` and re-run only the affected tasks.
 
 ## Design
 
+- [docs/README.md](docs/README.md) — documentation index and language switching.
 - [docs/HANDOVER.md](docs/HANDOVER.md) — decision record D1–D9, architecture, milestones, risks.
 - [docs/DESIGN.md](docs/DESIGN.md) — M0 research answers, M1 design, and the approved four-gate model.
 - [docs/decisions.md](docs/decisions.md) — decision log (D1–D9 inherited, D10–D23 recorded).
