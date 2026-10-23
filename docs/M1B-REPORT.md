@@ -27,7 +27,7 @@
 ```text
 node --check client.js       通过
 pnpm typecheck               通过
-pnpm test                    14 files / 107 tests
+pnpm test                    14 files / 109 tests
 pnpm build                   通过
 pnpm pack                    client.js + lib/** + cordis.patch.yml
 真实 lh-test profile         安装成功；--dump-config-schema 接受 dsh.client 清单
@@ -70,13 +70,13 @@ pnpm pack                    client.js + lib/** + cordis.patch.yml
 
 修复：
 
-- **chip 点击直接执行** `/longhaul on` / `/longhaul off`，不再自绘浮层；
+- **chip 通过 composer 的公开输入动作提交命令**：`inputActions.setDraft('/longhaul on')` + `submit()`，不再依赖第三方模块不可用的 `remote.commands` RPC，也不自绘浮层；
 - 风险说明移到 host 命令：`/longhaul on` 先调用 `ctx.approval.request({toolName:'longhaul_mode', displayReason:{en,zh}})`，只有 `allowed-once` 才开启；
-- 失败时 chip 旁显示 `!`，`title` 带具体错误；
-- 新增 `tests/integration/client-module.spec.ts`：真实加载 `client.js`、注册 slot、渲染 on/off 两种 chip；
+- 草稿非空时拒绝覆盖，`!` 显示原因；
+- 新增 `tests/integration/client-module.spec.ts`：加载 `client.js`、渲染 on/off、验证点击写入 `/longhaul on|off` 并 submit、验证草稿保护；
 - 新增 `tests/integration/command.spec.ts`：命令先请求审批、再持久化模式、再注入 notice。
 
-验证：`typecheck` 通过，`test` 107 passed。由于本次为定位问题做过 remove/add，运行中的 Desktop 客户端模块清单没有重新扫描，**需要再次完整重启 Desktop** 才能看到修复后的 chip；host 侧工具已热加载。
+验证：`typecheck` 通过，`test` 109 passed；新 bundle 在临时 web profile 中确认包含 `inputActions` 与 `/longhaul on`。运行中的 Desktop 仍持有更早的客户端 bundle 缓存，**需要最后一次完整重启**才能看到修复后的 chip；host 侧工具与命令已可用。
 
 ## 4. 已知问题
 
