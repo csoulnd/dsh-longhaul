@@ -64,17 +64,17 @@ pnpm pack                    client.js + lib/** + cordis.patch.yml
 
 结论：需要**完全退出并重启 Desktop** 做最终视觉验收，而不是刷新页面。如果重启后仍无 chip，用独立 web profile 的 DOM/控制台继续定位。
 
-### 3.4 chip 点击“没反应”的修复
+### 3.4 chip 点击“没反应”的修复（历史）
 
 用户反馈重启后 chip 仍在，但点击没有可见反馈。定位为：风险确认面板使用 `position:absolute; bottom:130%` 画在 composer 内，容易被输入区裁剪；看起来像按钮无响应。
 
 修复：
 
 - **chip 通过 composer 的公开输入动作提交命令**：`inputActions.setDraft('/longhaul on')` + `submit()`，不再依赖第三方模块不可用的 `remote.commands` RPC，也不自绘浮层；
-- 风险说明移到 host 命令：`/longhaul on` 先调用 `ctx.approval.request({toolName:'longhaul_mode', displayReason:{en,zh}})`，只有 `allowed-once` 才开启；
+- 风险说明曾尝试移到 host 命令的 `ctx.approval.request`，但命令通道没有 open turn（见 §3.7），最终改为原生确认框；
 - 草稿非空时拒绝覆盖，`!` 显示原因；
 - 新增 `tests/integration/client-module.spec.ts`：加载 `client.js`、渲染 on/off、验证点击写入 `/longhaul on|off` 并 submit、验证草稿保护；
-- 新增 `tests/integration/command.spec.ts`：命令先请求审批、再持久化模式、再注入 notice。
+- 新增 `tests/integration/command.spec.ts`：命令持久化模式并注入 notice。
 
 ### 3.5 真正导致 chip 消失的错误（CDP 定位）
 
@@ -108,17 +108,36 @@ Desktop 关窗口可能只是收进托盘。完全退出任选一种：
 
 本次问题不是没退干净：端口从 57945 → 52528 已证明 host 重启；真正原因是上面的客户端 selector 错误。
 
+### 3.7 命令通道没有 open turn：改用原生确认
+
+chip 能出现后，点击仍报：
+
+```text
+Long Haul not started: Error: approval.request() outside an open turn
+```
+
+`/longhaul on` 由命令通道执行，执行时没有 agent turn，`ctx.approval.request` 按设计只在 open turn 内可用，因此必然失败。这不是权限配置问题，而是确认层放错了。
+
+最终语义（回到最初设计）：
+
+- host 的 `/longhaul on` 不再请求审批，直接持久化模式并注入 notice；
+- chip 在模式关闭时先弹 `window.confirm`，内容包含创建子 Agent、额外 token、阶段交付件审批、构建/提交/发布仍由父会话执行；
+- 点“取消”不提交任何东西；点“确定”才写入 `/longhaul on` 并 submit；
+- 模式开启后 chip 显示「长任务 · 阶段」，再点直接 `/longhaul off`。
+
+验证：`typecheck` 0、`build` 0、`test` **110 passed**。真实 Desktop 上 chip 开启/退出均成功，会话内出现 `Long Haul mode is ON` / `OFF` notice。
+
 ## 4. 已知问题
 
 1. **设置页未做**：预算、扇出、交付件目录目前只能改 `cordis.yml`；M1b 收尾补 `settings.section`。
 2. **projection 依赖 zod 4.4.3**：必须与 DSH 的 zod 版本一致，`4.6.x` 会因类型不兼容失败；已在 `package.json` 固定。
 3. **client.js 手写、无 TS 类型**：换来无需 tsdown；后续若加设置页/复杂交互，再引入构建。
 4. **chip 不区分 root/child**：子会话也可能显示 chip；projection 状态仍来自 root 树。M1b 收尾按 session header 隐藏子会话入口。
-5. **风险确认已移到 host 命令**：CLI 与 chip 使用同一 `longhaul_mode` 审批，不再有“只在客户端确认”的绕过。
+5. **风险确认在客户端**：chip 用原生 `window.confirm` 确认；CLI 直接 `/longhaul on` 不弹确认，属已知取舍，后续可用 command 参数加 `confirm`。
 
 ## 5. 下一步
 
-1. 真实 Desktop 安装/重启，验收 chip 与风险面板。
-2. `settings.section`：预算、扇出、交付件目录（只读展示 + 写回配置）。
-3. 子会话隐藏入口。
-4. 命令层风险确认（可选）。
+1. ~~真实 Desktop 安装/重启，验收 chip 与风险确认~~（2026-10-23 通过，开启/退出 notice 均出现）。
+2. 真实 P0 验收：`longhaul_plan` → 写 `00-requirements.md` → `longhaul_submit` → 审批 → handoff。
+3. `settings.section`：预算、扇出、交付件目录（只读展示 + 写回配置）。
+4. 子会话隐藏入口。
