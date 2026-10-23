@@ -19,6 +19,9 @@ window.__ModuleLoader__.load({
       'chip.on.title': 'Leave Long Haul mode',
       'chip.failed': 'Long Haul command failed',
       'chip.draft': 'Clear the composer draft before toggling Long Haul.',
+      'risk.confirm': 'Start Long Haul mode?\n\nIt creates subagent sessions, spends additional tokens, '
+        + 'and submits each stage deliverable for your approval. Build, commit, push, and publish stay in the '
+        + 'parent session. You can leave the mode at any time.',
     }
 
     const zh = {
@@ -28,6 +31,8 @@ window.__ModuleLoader__.load({
       'chip.on.title': '退出长任务模式',
       'chip.failed': '长任务命令失败',
       'chip.draft': '请先清空输入框草稿，再切换长任务模式。',
+      'risk.confirm': '开始长任务模式？\n\n该模式会创建子 Agent、消耗额外 token，并在每个阶段结束时提交交付件等待审批。'
+        + '构建、提交、推送与发布仍由父会话执行。你可以随时退出该模式。',
     }
 
     const styles = {
@@ -62,6 +67,7 @@ window.__ModuleLoader__.load({
           setFailed(t('chip.draft'))
           return
         }
+        if (mode === 'off' && typeof window.confirm === 'function' && !window.confirm(t('risk.confirm'))) return
         setFailed(null)
         actions.setDraft(mode === 'on' ? '/longhaul off' : '/longhaul on')
         actions.submit()

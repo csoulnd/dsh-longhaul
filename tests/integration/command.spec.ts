@@ -45,7 +45,6 @@ describe('/longhaul command', () => {
       cancel: () => {},
     } as never
 
-    const approvals: { toolName: string; reason: string; displayReason?: unknown }[] = []
     type CommandHandler = (input: { agent: unknown; rawInput: string }) => Promise<{ kind: string; text: string }>
     let command: { handler: CommandHandler } | undefined
 
@@ -59,12 +58,6 @@ describe('/longhaul command', () => {
         return () => {}
       },
     })
-    provide(ctx, 'approval', {
-      request: async (request: { toolName: string; reason: string; displayReason?: unknown }) => {
-        approvals.push(request)
-        return 'allowed-once'
-      },
-    })
 
     apply(ctx, baseConfig())
     await Promise.resolve()
@@ -73,10 +66,6 @@ describe('/longhaul command', () => {
 
     const result = await command!.handler({ agent, rawInput: 'on' })
     expect(result.kind).toBe('success')
-    expect(approvals).toHaveLength(1)
-    expect(approvals[0]?.toolName).toBe('longhaul_mode')
-    expect(approvals[0]?.reason).toMatch(/subagent sessions/)
-    expect(JSON.stringify(approvals[0]?.displayReason)).toContain('子 Agent')
     expect(JSON.stringify(injected)).toContain('Long Haul mode is ON')
 
     const persisted = JSON.parse(await readFile(join(home, 'longhaul', 'root', 'state.json'), 'utf8')) as { mode: string }

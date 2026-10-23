@@ -21,10 +21,13 @@ const React = {
   Fragment: 'fragment',
 }
 
+let confirmAnswer = true
+
 function loadClient(): { inject: string[]; apply(ctx: unknown): void } {
   const source = readFileSync(new URL('../../client.js', import.meta.url), 'utf8')
   let registration: { id: string; factory(require: (name: string) => unknown): { inject: string[]; apply(ctx: unknown): void } } | undefined
   const window = {
+    confirm: () => confirmAnswer,
     __ModuleLoader__: {
       load(value: typeof registration) { registration = value },
     },
@@ -96,6 +99,18 @@ describe('client module', () => {
     const button = tree.children[0] as Node
     ;(button.props.onClick as () => void)()
     expect(calls).toEqual(['draft:/longhaul on', 'submit'])
+  })
+
+  it('does not submit when the risk confirmation is declined', () => {
+    confirmAnswer = false
+    try {
+      const { tree, calls } = chipOf({ mode: 'off', phase: 'P0' })
+      const button = tree.children[0] as Node
+      ;(button.props.onClick as () => void)()
+      expect(calls).toEqual([])
+    } finally {
+      confirmAnswer = true
+    }
   })
 
   it('writes and submits /longhaul off when clicked while on', () => {

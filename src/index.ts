@@ -27,7 +27,7 @@ import type { BudgetReport, ChildReport, LonghaulState, StageHandoff, StateEvent
 import { Config, resolveConfig } from './config.ts'
 import { dispatchProblem, ownershipConflicts, renderBrief, type DispatchTask } from './dispatch.ts'
 import { toolDenial } from './guard.ts'
-import { handoffText, modeNotice, MODE_RISK, policyText, stateContext } from './guidance.ts'
+import { handoffText, modeNotice, policyText, stateContext } from './guidance.ts'
 import { LonghaulMemory } from './memory.ts'
 import { deliverablePath } from './phases.ts'
 import { longhaulProjection } from './projection.ts'
@@ -426,26 +426,6 @@ export function apply(ctx: Context, config: Config): void {
           return { kind: 'error', text: 'Usage: /longhaul [on|off|status]' }
         }
         const on = argument === 'on'
-        if (on && settings.requireApproval) {
-          const approval = ctx.get('approval')
-          if (approval === undefined) {
-            return { kind: 'error', text: 'Long Haul needs an approval channel to start; no approval service is composed.' }
-          }
-          let outcome: ApprovalOutcome
-          try {
-            outcome = await approval.request({
-              agent,
-              toolName: 'longhaul_mode',
-              reason: MODE_RISK.en,
-              displayReason: { en: MODE_RISK.en, zh: MODE_RISK.zh },
-            })
-          } catch (error) {
-            return { kind: 'error', text: `Long Haul not started: ${String(error)}` }
-          }
-          if (outcome !== 'allowed-once') {
-            return { kind: 'error', text: `Long Haul not started (${outcome}).` }
-          }
-        }
         const next = reduce(state, { type: on ? 'mode/on' : 'mode/off', at: Date.now() })
         await persist(agent, next)
         try {
