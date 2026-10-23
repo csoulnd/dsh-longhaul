@@ -1,7 +1,8 @@
 /**
- * Long Haul composer chip. A click runs `/longhaul on` or `/longhaul off`; the
- * host command raises the risk approval before the mode starts, so this module
- * never draws its own popup (which would be clipped by the composer).
+ * Long Haul composer chip. A click writes `/longhaul on` (or `off`) into the
+ * composer through the public input actions and submits it, so the host command
+ * owns the risk approval and the command runs in a real turn. No RPC access and
+ * no custom popup are needed.
  */
 window.__ModuleLoader__.load({
   id: 'dsh-longhaul',
@@ -17,6 +18,7 @@ window.__ModuleLoader__.load({
       'chip.off.title': 'Start Long Haul mode',
       'chip.on.title': 'Leave Long Haul mode',
       'chip.failed': 'Long Haul command failed',
+      'chip.draft': 'Clear the composer draft before toggling Long Haul.',
     }
 
     const zh = {
@@ -25,6 +27,7 @@ window.__ModuleLoader__.load({
       'chip.off.title': '开始长任务模式',
       'chip.on.title': '退出长任务模式',
       'chip.failed': '长任务命令失败',
+      'chip.draft': '请先清空输入框草稿，再切换长任务模式。',
     }
 
     const styles = {
@@ -45,22 +48,24 @@ window.__ModuleLoader__.load({
       const view = props.useProjection('longhaul')
       const mode = view === undefined ? 'off' : view.mode
       const phase = view === undefined ? 'P0' : view.phase
-      const [busy, setBusy] = React.useState(false)
+      const input = typeof props.useInput === 'function' ? props.useInput() : undefined
+      const actions = props.inputActions
       const [failed, setFailed] = React.useState(null)
       const t = props.t
 
       const run = () => {
-        if (busy) return
-        setBusy(true)
+        if (actions === undefined) {
+          setFailed(t('chip.failed'))
+          return
+        }
+        const draft = input === undefined ? '' : input.draft
+        if (draft.trim() !== '') {
+          setFailed(t('chip.draft'))
+          return
+        }
         setFailed(null)
-        const line = mode === 'on' ? '/longhaul off' : '/longhaul on'
-        props.execute(line).then((failure) => {
-          setBusy(false)
-          if (failure !== null) setFailed(failure)
-        }, (reason) => {
-          setBusy(false)
-          setFailed(reason instanceof Error ? reason.message : String(reason))
-        })
+        actions.setDraft(mode === 'on' ? '/longhaul off' : '/longhaul on')
+        actions.submit()
       }
 
       const label = mode === 'on' ? t('chip.on').replace('{phase}', phase) : t('chip.label')
@@ -69,14 +74,11 @@ window.__ModuleLoader__.load({
           type: 'button',
           style: styles.chip,
           title: mode === 'on' ? t('chip.on.title') : t('chip.off.title'),
-          'aria-busy': busy,
           'aria-label': label,
-          disabled: busy,
           onClick: run,
         },
         mode === 'on' ? h('span', { style: styles.dot, 'aria-hidden': true }) : null,
         label,
-        busy ? h('span', { 'aria-hidden': true }, '…') : null,
         ),
         failed !== null
           ? h('span', { style: styles.error, title: failed, 'aria-label': t('chip.failed') }, '!')
@@ -85,7 +87,7 @@ window.__ModuleLoader__.load({
     }
 
     return {
-      inject: ['slots', 'remote.commands', 'locale'],
+      inject: ['slots', 'locale'],
       apply(ctx) {
         ctx.locale.register(NS, { zh, en })
         ctx.slots.inject('conversation.input.left', () => ctx.slots.register({
@@ -93,14 +95,6 @@ window.__ModuleLoader__.load({
           id: 'dsh-longhaul',
           order: 20,
           locale: NS,
-          inject: (sessionId) => ({
-            execute: async (line) => {
-              const result = await ctx.remote.commands.execute(sessionId, line, [])
-              if (!result.ok) return `${result.error.message} (${result.error.code})`
-              if (result.value === undefined) return `unknown command: ${line}`
-              return null
-            },
-          }),
         }, Chip))
       },
     }
