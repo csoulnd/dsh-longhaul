@@ -27,6 +27,7 @@ import type {
   DesignChangeRequest,
   LonghaulState,
   Phase,
+  TaskStatus,
 } from './types.ts'
 
 /** Approval-gated tool names; stable so audit logs stay readable. */
@@ -137,10 +138,19 @@ export function createLonghaulTools(runtime: ToolRuntime): ToolDefinition[] {
 
     defineTool({
       name: 'longhaul_plan',
-      description: 'Record the approved task plan (objective, tasks, owned files, dependencies) in P0. '
-        + 'The plan is required before design and implementation and is fixed once recorded.',
+      description: 'Record, revise, or recover the approved task plan in P0/P1. '
+        + 'The plan is required before submission and is immutable unless revised with an explicit reason.',
       parameters: {
         objective: { type: 'string', required: true, description: 'One-sentence objective for the whole long task.' },
+        mode: {
+          type: 'string',
+          enum: ['record', 'revise', 'recover'],
+          description: 'record (P0 first plan), revise (P0 with reason), recover (P1 legacy missing plan).',
+        },
+        reason: {
+          type: 'string',
+          description: 'Required for revise/recover; recorded in the durable state and audit record.',
+        },
         tasks: {
           type: 'array',
           required: true,
@@ -173,42 +183,130 @@ export function createLonghaulTools(runtime: ToolRuntime): ToolDefinition[] {
         if (exec.agent === undefined) fail('longhaul_plan requires an owning agent session')
         const state = await runtime.load(exec.agent)
         if (state.mode !== 'on') fail('Long Haul mode is off; enable it before planning')
-        if (state.phase !== 'P0') fail(`a task plan can only be recorded in P0 (current ${state.phase})`)
+        const mode = args.mode ?? 'record'
+        if (mode !== 'record' && mode !== 'revise' && mode !== 'recover') {
+          fail(`unknown plan mode ${String(mode)}; use record, revise, or recover`)
+        }
+        if (mode === 'recover') {
+          if (state.phase !== 'P1') fail(`plan recovery is only available in P1 (current ${state.phase})`)
+        } else if (state.phase !== 'P0') {
+          fail(`a task plan can only be recorded or revised in P0 (current ${state.phase})`)
+        }
         if (args.tasks.length === 0) fail('a task plan needs at least one task')
         const ids = new Set<string>()
         for (const task of args.tasks) {
           if (ids.has(task.id)) fail(`duplicate task id ${task.id}`)
           ids.add(task.id)
+          if (task.budgetSteps !== undefined && (!Number.isInteger(task.budgetSteps) || task.budgetSteps < 1)) {
+            fail(`task ${task.id} budgetSteps must be a positive integer`)
+          }
         }
         for (const task of args.tasks) {
           for (const dependency of task.dependsOn) {
             if (!ids.has(dependency)) fail(`task ${task.id} depends on unknown task ${dependency}`)
           }
         }
+        const plan = {
+          objective: args.objective,
+          createdAt: Date.now(),
+          version: 1,
+          tasks: args.tasks.map(task => ({
+            id: task.id,
+            title: task.title,
+            status: 'pending' as const,
+            files: task.files,
+            dependsOn: task.dependsOn,
+            ...(task.budgetSteps === undefined ? {} : { budgetSteps: task.budgetSteps }),
+          })),
+        }
+        const reason = args.reason?.trim() ?? ''
+        let next: LonghaulState
+        if (mode === 'record') {
+          if (state.plan !== undefined) {
+            fail('a task plan already exists; pass mode "revise" with a reason to change it')
+          }
+          next = reduce(state, { type: 'plan/set', at: Date.now(), plan })
+        } else if (mode === 'revise') {
+          if (state.plan === undefined) fail('there is no plan to revise; use mode "record" first')
+          if (reason === '') fail('revising a task plan requires a non-empty reason')
+          next = reduce(state, {
+            type: 'plan/set',
+            at: Date.now(),
+            plan,
+            revision: { reason },
+          })
+        } else {
+          if (state.plan !== undefined) fail('a task plan already exists; recovery is not available')
+          if (state.pendingApproval !== undefined) fail('cannot recover a plan while a submission is pending')
+          if (state.lastApproved?.phase !== 'P0') fail('plan recovery requires an approved P0')
+          if (reason === '') fail('plan recovery requires a non-empty reason')
+          next = reduce(state, { type: 'plan/recover', at: Date.now(), plan, reason })
+        }
+        await runtime.save(exec.agent, next)
+        const version = next.plan?.version ?? 1
+        const summary = mode === 'record'
+          ? `Recorded plan with ${args.tasks.length} task(s); version ${version}. Submit the P0 requirements deliverable for approval next.`
+          : mode === 'revise'
+            ? `Revised plan to version ${version} with ${args.tasks.length} task(s).`
+            : `Recovered the missing P1 plan at version ${version}; reason recorded.`
+        return { summary, taskCount: args.tasks.length }
+      },
+      presentCall: () => ({ card: 'generic', title: 'Record Long Haul plan', kind: 'other' }),
+    }),
+
+    defineTool({
+      name: 'longhaul_task',
+      description: 'Update one task in the approved Long Haul plan (status and optional owner). '
+        + 'Use this to keep the sidebar task tree and the durable plan in sync during P2/P3.',
+      parameters: {
+        taskId: { type: 'string', required: true, description: 'Plan task id.' },
+        status: {
+          type: 'string',
+          required: true,
+          enum: ['pending', 'running', 'done', 'blocked', 'cancelled'],
+          description: 'New task status.',
+        },
+        ownerSessionId: { type: 'string', description: 'Optional child session currently owning the task.' },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            summary: { type: 'string', required: true },
+            taskId: { type: 'string', required: true },
+            status: { type: 'string', required: true },
+          },
+        },
+        render: (_args, value) => [{ type: 'text', text: value.summary }],
+      },
+      execute: async (args, exec) => {
+        if (exec.agent === undefined) fail('longhaul_task requires an owning agent session')
+        const state = await runtime.load(exec.agent)
+        if (state.mode !== 'on') fail('Long Haul mode is off')
+        if (state.phase !== 'P2' && state.phase !== 'P3') {
+          fail(`task status can only be updated in P2/P3 (current ${state.phase})`)
+        }
+        const task = state.plan?.tasks.find(candidate => candidate.id === args.taskId)
+        if (task === undefined) fail(`task ${args.taskId} is not in the approved plan`)
+        const status: TaskStatus = args.status
         const next = reduce(state, {
-          type: 'plan/set',
+          type: 'task/update',
           at: Date.now(),
-          plan: {
-            objective: args.objective,
-            createdAt: Date.now(),
-            version: 1,
-            tasks: args.tasks.map(task => ({
-              id: task.id,
-              title: task.title,
-              status: 'pending' as const,
-              files: task.files,
-              dependsOn: task.dependsOn,
-              ...(task.budgetSteps === undefined ? {} : { budgetSteps: task.budgetSteps }),
-            })),
+          task: {
+            ...task,
+            status,
+            ...(args.ownerSessionId === undefined ? {} : { ownerSessionId: args.ownerSessionId }),
           },
         })
         await runtime.save(exec.agent, next)
         return {
-          summary: `Recorded plan with ${args.tasks.length} task(s). Submit the P0 requirements deliverable for approval next.`,
-          taskCount: args.tasks.length,
+          summary: `Task ${args.taskId} is ${status}${args.ownerSessionId === undefined ? '' : ` (owner ${args.ownerSessionId})`}.`,
+          taskId: args.taskId,
+          status,
         }
       },
-      presentCall: () => ({ card: 'generic', title: 'Record Long Haul plan', kind: 'other' }),
+      presentCall: () => ({ card: 'generic', title: 'Update Long Haul task', kind: 'other' }),
     }),
 
     defineTool({
@@ -238,7 +336,7 @@ export function createLonghaulTools(runtime: ToolRuntime): ToolDefinition[] {
         if (state.mode !== 'on') fail('Long Haul mode is off')
         const phase = state.phase
         if (state.pendingApproval !== undefined) fail(`a ${state.pendingApproval.phase} submission is already pending`)
-        if (phase !== 'P0' && state.plan === undefined) fail(`phase ${phase} requires an approved task plan; record one in P0`)
+        if (state.plan === undefined) fail(`phase ${phase} requires a task plan; record one with longhaul_plan first`)
         const path = resolveDeliverable(runtime, exec.agent, phase, args.path)
         let text = ''
         try {
@@ -367,18 +465,20 @@ export function createLonghaulTools(runtime: ToolRuntime): ToolDefinition[] {
 
     defineTool({
       name: 'longhaul_memory',
-      description: 'Read or write Long Haul memory. Decisions are tree-wide and only the root may append them; '
-        + 'findings are branch-scoped and append-only; the root or a parent may promote a finding into a decision.',
+      description: 'Read or write Long Haul memory. Decisions and artifacts are tree-wide and only the root may '
+        + 'append them; findings are branch-scoped and append-only; the root or a parent may promote a finding '
+        + 'into a decision.',
       parameters: {
         action: {
           type: 'string',
           required: true,
-          enum: ['append_finding', 'append_decision', 'list', 'promote'],
-          description: 'append_finding | append_decision | list | promote.',
+          enum: ['append_finding', 'append_decision', 'append_artifact', 'list', 'promote'],
+          description: 'append_finding | append_decision | append_artifact | list | promote.',
         },
         text: { type: 'string', description: 'Record text for append actions.' },
         tags: { type: 'array', items: { type: 'string' }, description: 'Optional tags.' },
         findingId: { type: 'string', description: 'Finding id for promote.' },
+        path: { type: 'string', description: 'Workspace-relative artifact path for append_artifact.' },
         evidence: { type: 'string', description: 'Optional command, path, or result supporting the record.' },
       },
       output: {
@@ -414,6 +514,16 @@ export function createLonghaulTools(runtime: ToolRuntime): ToolDefinition[] {
           if (args.text === undefined) fail('append_decision requires text')
           await store.appendDecision(sessionId, {
             text: args.text,
+            ...(args.tags === undefined ? {} : { tags: args.tags }),
+            ...(args.evidence === undefined ? {} : { evidence: args.evidence }),
+          })
+        } else if (args.action === 'append_artifact') {
+          if (!isRoot) fail('only the root session may write artifacts')
+          if (args.text === undefined) fail('append_artifact requires text')
+          if (args.path === undefined) fail('append_artifact requires path')
+          await store.appendArtifact(sessionId, {
+            text: args.text,
+            path: args.path,
             ...(args.tags === undefined ? {} : { tags: args.tags }),
             ...(args.evidence === undefined ? {} : { evidence: args.evidence }),
           })

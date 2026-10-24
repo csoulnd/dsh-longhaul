@@ -49,6 +49,69 @@ describe('plan', () => {
     })).toThrow(/P0/)
   })
 
+  it('rejects a silent second plan and versions an explicit revision', () => {
+    const planned = reduce(reduce(initialState('root', 1), { type: 'mode/on', at: 2 }), {
+      type: 'plan/set',
+      at: 3,
+      plan: { objective: 'first', createdAt: 3, version: 1, tasks: [] },
+    })
+    expect(() => reduce(planned, {
+      type: 'plan/set',
+      at: 4,
+      plan: { objective: 'second', createdAt: 4, version: 1, tasks: [] },
+    })).toThrow(/already exists/)
+    const revised = reduce(planned, {
+      type: 'plan/set',
+      at: 5,
+      plan: { objective: 'second', createdAt: 5, version: 1, tasks: [] },
+      revision: { reason: 'scope changed' },
+    })
+    expect(revised.plan?.objective).toBe('second')
+    expect(revised.plan?.version).toBe(2)
+    expect(revised.plan?.createdAt).toBe(3)
+    expect(() => reduce(planned, {
+      type: 'plan/set',
+      at: 6,
+      plan: { objective: 'third', createdAt: 6, version: 1, tasks: [] },
+      revision: { reason: '   ' },
+    })).toThrow(/non-empty reason/)
+  })
+
+  it('recovers a missing P1 plan only once and only after an approved P0', () => {
+    const approvedP0: StageApproval = {
+      phase: 'P0',
+      deliverablePath: '/tmp/P0.md',
+      summary: 'done',
+      requestedAt: 3,
+      decision: 'allowed',
+    }
+    const atP1: LonghaulState = {
+      ...reduce(initialState('root', 1), { type: 'mode/on', at: 2 }),
+      phase: 'P1',
+      lastApproved: approvedP0,
+    }
+    const recovered = reduce(atP1, {
+      type: 'plan/recover',
+      at: 7,
+      plan: { objective: 'legacy', createdAt: 7, version: 1, tasks: [] },
+      reason: 'legacy session had no plan',
+    })
+    expect(recovered.plan?.objective).toBe('legacy')
+    expect(recovered.lastPlanRecovery?.reason).toBe('legacy session had no plan')
+    expect(() => reduce(recovered, {
+      type: 'plan/recover',
+      at: 8,
+      plan: { objective: 'again', createdAt: 8, version: 1, tasks: [] },
+      reason: 'again',
+    })).toThrow(/already exists/)
+    expect(() => reduce({ ...atP1, lastApproved: undefined }, {
+      type: 'plan/recover',
+      at: 9,
+      plan: { objective: 'no approval', createdAt: 9, version: 1, tasks: [] },
+      reason: 'no approval',
+    })).toThrow(/approved P0/)
+  })
+
   it('recomputes file owners from updated tasks', () => {
     const planned = reduce(reduce(initialState('root', 1), { type: 'mode/on', at: 2 }), {
       type: 'plan/set',

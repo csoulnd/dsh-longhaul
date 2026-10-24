@@ -82,6 +82,114 @@ describe('longhaul_status', () => {
   })
 })
 
+describe('longhaul_plan lifecycle', () => {
+  it('records, refuses silent overwrite, and revises with a reason', async () => {
+    let current: LonghaulState = { ...initialState('root', 1), mode: 'on', phase: 'P0' }
+    const tool = createLonghaulTools(runtime({
+      load: async () => current,
+      save: async (_agent, next) => { current = next },
+    })).find(candidate => candidate.name === 'longhaul_plan')
+    expect(tool).toBeDefined()
+
+    const first = await tool!.execute({
+      objective: 'ship',
+      tasks: [{ id: 't1', title: 'one', files: ['src/a.ts'], dependsOn: [] }],
+    }, { agent } as never) as { taskCount: number }
+    expect(first.taskCount).toBe(1)
+    expect(current.plan?.version).toBe(1)
+
+    await expect(tool!.execute({
+      objective: 'ship again',
+      tasks: [{ id: 't1', title: 'one', files: ['src/a.ts'], dependsOn: [] }],
+    }, { agent } as never)).rejects.toThrow(/already exists/)
+
+    await tool!.execute({
+      mode: 'revise',
+      reason: 'scope changed',
+      objective: 'ship revised',
+      tasks: [{ id: 't1', title: 'one', files: ['src/a.ts'], dependsOn: [] }],
+    }, { agent } as never)
+    expect(current.plan?.objective).toBe('ship revised')
+    expect(current.plan?.version).toBe(2)
+  })
+
+  it('recovers a missing plan in P1 only from an approved P0', async () => {
+    let current: LonghaulState = {
+      ...initialState('root', 1),
+      mode: 'on',
+      phase: 'P1',
+      lastApproved: {
+        phase: 'P0',
+        deliverablePath: '.longhaul/deliverables/00-requirements.md',
+        summary: 'approved',
+        requestedAt: 1,
+        decision: 'allowed',
+      },
+    }
+    const tool = createLonghaulTools(runtime({
+      load: async () => current,
+      save: async (_agent, next) => { current = next },
+    })).find(candidate => candidate.name === 'longhaul_plan')
+
+    await tool!.execute({
+      mode: 'recover',
+      reason: 'legacy session had no plan',
+      objective: 'recover',
+      tasks: [{ id: 't1', title: 'one', files: [], dependsOn: [] }],
+    }, { agent } as never)
+    expect(current.plan?.objective).toBe('recover')
+    expect(current.lastPlanRecovery?.reason).toBe('legacy session had no plan')
+
+    await expect(tool!.execute({
+      mode: 'recover',
+      reason: 'again',
+      objective: 'again',
+      tasks: [{ id: 't1', title: 'one', files: [], dependsOn: [] }],
+    }, { agent } as never)).rejects.toThrow(/already exists/)
+  })
+})
+
+describe('longhaul_submit plan gate', () => {
+  it('refuses a P0 submission without a plan and does not write pending approval', async () => {
+    let current: LonghaulState = { ...initialState('root', 1), mode: 'on', phase: 'P0' }
+    const tool = createLonghaulTools(runtime({
+      load: async () => current,
+      save: async (_agent, next) => { current = next },
+    })).find(candidate => candidate.name === 'longhaul_submit')
+
+    await expect(tool!.execute({ summary: 'no plan' }, { agent } as never))
+      .rejects.toThrow(/requires a task plan/)
+    expect(current.pendingApproval).toBeUndefined()
+  })
+})
+
+describe('longhaul_task', () => {
+  it('updates a plan task status and owner', async () => {
+    let current: LonghaulState = state()
+    const tool = createLonghaulTools(runtime({
+      load: async () => current,
+      save: async (_agent, next) => { current = next },
+    })).find(candidate => candidate.name === 'longhaul_task')
+    expect(tool).toBeDefined()
+
+    const result = await tool!.execute({
+      taskId: 't1',
+      status: 'running',
+      ownerSessionId: 'child-1',
+    }, { agent } as never) as { summary: string; taskId: string; status: string }
+    expect(result).toEqual({
+      summary: 'Task t1 is running (owner child-1).',
+      taskId: 't1',
+      status: 'running',
+    })
+    expect(current.plan?.tasks[0]?.status).toBe('running')
+    expect(current.plan?.tasks[0]?.ownerSessionId).toBe('child-1')
+
+    await expect(tool!.execute({ taskId: 'missing', status: 'done' }, { agent } as never))
+      .rejects.toThrow(/not in the approved plan/)
+  })
+})
+
 describe('longhaul_memory from a child', () => {
   it('allows branch findings but refuses decisions and promotion', async () => {
     const findings: string[] = []
@@ -106,5 +214,35 @@ describe('longhaul_memory from a child', () => {
       .rejects.toThrow(/only the root session/)
     await expect(tool!.execute({ action: 'promote', findingId: 'f1' }, { agent: child } as never))
       .rejects.toThrow(/only the root session/)
+  })
+})
+
+describe('longhaul_memory artifacts', () => {
+  it('records an artifact for the root', async () => {
+    const artifacts: { text: string; path: string }[] = []
+    const store = {
+      appendArtifact: async (_sessionId: string, input: { text: string; path: string }) => {
+        artifacts.push(input)
+      },
+      appendFinding: async () => { throw new Error('unexpected finding write') },
+      appendDecision: async () => { throw new Error('unexpected decision write') },
+      listDecisions: async () => [],
+      listFindings: async () => [],
+      listArtifacts: async () => artifacts,
+      promote: async () => { throw new Error('unexpected promote') },
+    }
+    const tool = createLonghaulTools(runtime({ memoryFor: () => store as never }))
+      .find(candidate => candidate.name === 'longhaul_memory')
+
+    const result = await tool!.execute({
+      action: 'append_artifact',
+      text: 'implementation evidence',
+      path: '.longhaul/deliverables/02-implementation.md',
+    }, { agent } as never) as { artifacts: number }
+    expect(artifacts).toEqual([{
+      text: 'implementation evidence',
+      path: '.longhaul/deliverables/02-implementation.md',
+    }])
+    expect(result.artifacts).toBe(1)
   })
 })

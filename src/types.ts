@@ -5,6 +5,17 @@
  *
  * @module dsh-longhaul/types
  */
+import type { Session } from '@deepseek-ai/dsh-session'
+
+declare module '@deepseek-ai/cordis' {
+  interface Context {
+    /** Session-scoped effective working directory; the session header keeps the original project. */
+    workingDirectory: {
+      /** Read the committed directory without filesystem I/O. */
+      get(session: Session): string
+    }
+  }
+}
 
 /** The four external phase gates, in order. */
 export const PHASES = ['P0', 'P1', 'P2', 'P3'] as const
@@ -99,6 +110,8 @@ export interface LonghaulState {
   lastApproved?: StageApproval
   /** Most recent rejected submission, kept for guidance and audit. */
   lastRejection?: { phase: Phase; reason: string; at: number }
+  /** Set when a legacy P1 session recovered a missing plan. */
+  lastPlanRecovery?: { at: number; reason: string }
   changes: DesignChangeRequest[]
   /** Set when a phase exit still needs its history compacted. */
   compactPending: boolean
@@ -166,7 +179,8 @@ export interface BudgetReport {
 export type StateEvent =
   | { type: 'mode/on'; at: number }
   | { type: 'mode/off'; at: number }
-  | { type: 'plan/set'; at: number; plan: TaskPlan }
+  | { type: 'plan/set'; at: number; plan: TaskPlan; revision?: { reason: string } }
+  | { type: 'plan/recover'; at: number; plan: TaskPlan; reason: string }
   | { type: 'phase/submit'; at: number; approval: StageApproval }
   | { type: 'phase/approve'; at: number; phase: Phase }
   | { type: 'phase/reject'; at: number; phase: Phase; reason?: string }
@@ -225,6 +239,36 @@ declare module '@deepseek-ai/dsh-session/types' {
       pending: string
       steps: number
       updatedAt: number
+      /** Plan objective, empty when no plan has been recorded. */
+      objective: string
+      /** Plan version, 0 when no plan has been recorded. */
+      planVersion: number
+      /** The approved plan's task tree, folded by the client projection. */
+      tasks: {
+        id: string
+        title: string
+        status: TaskStatus
+        files: string[]
+        dependsOn: string[]
+        ownerSessionId?: string
+        budgetSteps?: number
+      }[]
+      /** Workspace-relative deliverable path per phase. */
+      deliverables: Record<Phase, string>
+      /** Phase gates with their current status and deliverable. */
+      gates: {
+        phase: Phase
+        status: 'done' | 'active' | 'waiting' | 'pending'
+        deliverable: string
+        decidedAt?: number
+      }[]
+      /** Latest tree-memory evidence and total counts. */
+      evidence: {
+        decisions: { id: string; text: string; time: number }[]
+        findings: { id: string; text: string; time: number }[]
+        artifacts: { id: string; text: string; time: number }[]
+        counts: { decisions: number; findings: number; artifacts: number }
+      }
     }
   }
 }

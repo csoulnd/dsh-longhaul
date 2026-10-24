@@ -23,6 +23,7 @@ import type {} from '@deepseek-ai/dsh-session-projection'
 import type { SubagentActivation } from '@deepseek-ai/dsh-subagent'
 import type { ApprovalOutcome } from '@deepseek-ai/dsh-user-approval'
 import { evaluateBudget } from './budget.ts'
+import { PHASES } from './types.ts'
 import type { BudgetReport, ChildReport, LonghaulState, StageHandoff, StateEvent } from './types.ts'
 import { Config, resolveConfig } from './config.ts'
 import { dispatchProblem, ownershipConflicts, renderBrief, type DispatchTask } from './dispatch.ts'
@@ -48,7 +49,7 @@ declare module '@deepseek-ai/dsh-llm' {
 export const name = 'longhaul'
 
 /** Services the plugin cannot work without. */
-export const inject = ['agents', 'tools', 'systemPrompt']
+export const inject = ['agents', 'tools', 'systemPrompt', 'workingDirectory']
 
 /** Structured result every child session must return through `structured_output`. */
 const CHILD_OUTPUT_SCHEMA: ObjectJsonSchema = {
@@ -121,6 +122,10 @@ export function apply(ctx: Context, config: Config): void {
   }
 
   const parentOf = (sessionId: string): string | undefined => {
+    // A dispatched child keeps its durable owner edge after the live agent is
+    // disposed, so memory ACL/promote still resolve it to the root branch.
+    const knownRoot = childRoots.get(sessionId)
+    if (knownRoot !== undefined && knownRoot !== sessionId) return knownRoot
     for (const agent of ctx.agents.list()) {
       if (String(agent.session.header.id) === sessionId) {
         const parent = agent.session.header.parentSession
@@ -132,6 +137,9 @@ export function apply(ctx: Context, config: Config): void {
 
   const agentFor = (sessionId: string): Agent | undefined =>
     ctx.agents.list().find(agent => String(agent.session.header.id) === sessionId)
+
+  /** Effective working directory; the session header keeps the original project. */
+  const cwdOf = (agent: Agent): string => ctx.workingDirectory.get(agent.session)
 
   /** Walk the live lineage to the root session; undefined on a cycle. */
   const sessionRoot = (sessionId: string): string | undefined => {
@@ -156,6 +164,9 @@ export function apply(ctx: Context, config: Config): void {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
       state = initialState(root, Date.now())
     }
+    for (const task of state.plan?.tasks ?? []) {
+      if (task.ownerSessionId !== undefined) childRoots.set(task.ownerSessionId, root)
+    }
     states.set(root, state)
     return state
   }
@@ -169,6 +180,53 @@ export function apply(ctx: Context, config: Config): void {
     await writeFile(temporary, `${JSON.stringify(state, undefined, 2)}\n`, 'utf8')
     await rename(temporary, path)
     if (!record) return
+    const deliverables = {
+      P0: deliverablePath(settings.deliverableDir, 'P0'),
+      P1: deliverablePath(settings.deliverableDir, 'P1'),
+      P2: deliverablePath(settings.deliverableDir, 'P2'),
+      P3: deliverablePath(settings.deliverableDir, 'P3'),
+    }
+    const currentIndex = PHASES.indexOf(state.phase)
+    const gates = PHASES.map((phase, index) => ({
+      phase,
+      status: index < currentIndex
+        ? 'done' as const
+        : index === currentIndex
+          ? (state.pendingApproval?.phase === phase ? 'waiting' as const : 'active' as const)
+          : 'pending' as const,
+      deliverable: deliverables[phase],
+      ...(state.lastApproved?.phase === phase && state.lastApproved.decidedAt !== undefined
+        ? { decidedAt: state.lastApproved.decidedAt }
+        : {}),
+    }))
+    let evidence = {
+      decisions: [] as { id: string; text: string; time: number }[],
+      findings: [] as { id: string; text: string; time: number }[],
+      artifacts: [] as { id: string; text: string; time: number }[],
+      counts: { decisions: 0, findings: 0, artifacts: 0 },
+    }
+    try {
+      const memory = memoryFor(state.rootSessionId)
+      const [decisions, findings, artifacts] = await Promise.all([
+        memory.listDecisions(),
+        memory.listFindings(state.rootSessionId, parentOf),
+        memory.listArtifacts(),
+      ])
+      const recent = (records: readonly { id: string; text: string; time: number }[]) =>
+        records.slice(-5).map(record => ({ id: record.id, text: record.text, time: record.time }))
+      evidence = {
+        decisions: recent(decisions),
+        findings: recent(findings),
+        artifacts: recent(artifacts),
+        counts: {
+          decisions: decisions.length,
+          findings: findings.length,
+          artifacts: artifacts.length,
+        },
+      }
+    } catch (error) {
+      ctx.logger.warn(`longhaul: tree memory could not be projected: ${String(error)}`)
+    }
     try {
       appendPluginRecord(agent.session, 'plugin:longhaul/state', {
         mode: state.mode,
@@ -178,6 +236,20 @@ export function apply(ctx: Context, config: Config): void {
         pending: state.pendingApproval?.phase ?? '',
         steps: state.budget.total.steps,
         updatedAt: state.updatedAt,
+        objective: state.plan?.objective ?? '',
+        planVersion: state.plan?.version ?? 0,
+        tasks: (state.plan?.tasks ?? []).map(task => ({
+          id: task.id,
+          title: task.title,
+          status: task.status,
+          files: [...task.files],
+          dependsOn: [...task.dependsOn],
+          ...(task.ownerSessionId === undefined ? {} : { ownerSessionId: task.ownerSessionId }),
+          ...(task.budgetSteps === undefined ? {} : { budgetSteps: task.budgetSteps }),
+        })),
+        deliverables,
+        gates,
+        evidence,
       })
     } catch (error) {
       ctx.logger.warn(`longhaul: state saved but the audit record was rejected: ${String(error)}`)
@@ -283,7 +355,7 @@ export function apply(ctx: Context, config: Config): void {
     rootOf,
     rootSessionOf: agent => childRoots.get(String(agent.session.header.id)) ?? sessionRoot(String(agent.session.header.id)),
     parentOf,
-    cwdOf: agent => agent.session.header.cwd ?? process.cwd(),
+    cwdOf,
     approve,
     notify,
     budgetReport,
@@ -315,7 +387,7 @@ export function apply(ctx: Context, config: Config): void {
         request: {
           parent: agent,
           prompt: [{ type: 'text', text: renderBrief({ task, state: current, config: settings, decisions, findings }) }],
-          ...(agent.session.header.cwd === undefined ? {} : { cwd: agent.session.header.cwd }),
+          cwd: cwdOf(agent),
           outputSchema: CHILD_OUTPUT_SCHEMA,
           maxDepth: settings.maxDepth,
           ...(route === undefined ? {} : { agentOptions: { provider: route.provider, model: route.model } }),
@@ -451,9 +523,11 @@ export function apply(ctx: Context, config: Config): void {
     if (states.has(root)) return
     const agent = ctx.agents.get(session.header.id)
     if (agent === undefined) return
-    void load(agent).catch((error: unknown) => {
-      ctx.logger.warn(`longhaul: cannot load state for ${root}: ${String(error)}`)
-    })
+    void load(agent)
+      .then(state => (state.mode === 'on' ? persist(agent, state) : undefined))
+      .catch((error: unknown) => {
+        ctx.logger.warn(`longhaul: cannot load state for ${root}: ${String(error)}`)
+      })
   }
   ctx.on('session/created', (session: Session) => { ensure(session) })
   for (const agent of ctx.agents.list()) ensure(agent.session)
@@ -464,20 +538,39 @@ export function apply(ctx: Context, config: Config): void {
     const sessionId = String(exec.agent.session.header.id)
     const root = childRoots.get(sessionId) ?? sessionRoot(sessionId)
     let state = root === undefined ? undefined : states.get(root)
+    let stateError: string | undefined
     if (root !== undefined && state === undefined) {
       const rootAgent = agentFor(root)
-      if (rootAgent !== undefined) {
-        state = await load(rootAgent).catch(() => undefined)
+      if (rootAgent === undefined) {
+        stateError = `root session ${root} is not live`
+      } else {
+        try {
+          state = await load(rootAgent)
+        } catch (error) {
+          stateError = String(error)
+        }
       }
     }
+    let cwd: string | undefined
+    try {
+      cwd = cwdOf(exec.agent)
+    } catch (error) {
+      stateError ??= String(error)
+      cwd = undefined
+    }
+    const ownedFiles = state?.plan?.tasks
+      .find(task => task.ownerSessionId === sessionId)
+      ?.files.map(file => file.replaceAll('\\', '/')) ?? []
     const denial = toolDenial({
       toolName: exec.name,
       args: exec.arguments,
       sessionId,
       isRoot: root === sessionId,
-      cwd: exec.agent.session.header.cwd ?? process.cwd(),
+      cwd,
       deliverableDir: settings.deliverableDir,
       state,
+      ...(stateError === undefined ? {} : { stateError }),
+      ownedFiles,
     })
     return denial === undefined ? next() : { kind: 'deny', reason: denial }
   })

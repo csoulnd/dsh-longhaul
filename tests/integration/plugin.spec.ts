@@ -56,13 +56,14 @@ describe('plugin composition', () => {
       context: (section: SectionDefinition) => { contexts.push(section); return () => {} },
     })
     provide(ctx, 'commands', { register: (command: CommandDefinition) => { commands.push(command); return () => {} } })
+    provide(ctx, 'workingDirectory', { get: () => home })
 
     apply(ctx, baseConfig())
     await Promise.resolve()
     await Promise.resolve()
 
     expect(name).toBe('longhaul')
-    expect(inject).toEqual(['agents', 'tools', 'systemPrompt'])
+    expect(inject).toEqual(['agents', 'tools', 'systemPrompt', 'workingDirectory'])
     expect(tools.map(tool => tool.name).sort()).toEqual([
       'longhaul_change',
       'longhaul_dispatch',
@@ -70,6 +71,7 @@ describe('plugin composition', () => {
       'longhaul_plan',
       'longhaul_status',
       'longhaul_submit',
+      'longhaul_task',
     ])
     expect(sections[0]?.name).toBe('longhaul:policy')
     expect(sections[0]?.order).toBe(700)

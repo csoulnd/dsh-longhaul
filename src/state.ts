@@ -48,9 +48,32 @@ export function reduce(state: LonghaulState, event: StateEvent): LonghaulState {
       return { ...state, mode: 'on', updatedAt: event.at }
     case 'mode/off':
       return { ...state, mode: 'off', updatedAt: event.at }
-    case 'plan/set':
+    case 'plan/set': {
       if (state.phase !== 'P0') throw new Error(`longhaul: a task plan can only be set in P0 (current ${state.phase})`)
-      return { ...state, plan: event.plan, updatedAt: event.at }
+      if (event.revision !== undefined && event.revision.reason.trim() === '') {
+        throw new Error('longhaul: revising a task plan requires a non-empty reason')
+      }
+      if (state.plan !== undefined && event.revision === undefined) {
+        throw new Error('longhaul: a task plan already exists; pass revision.reason to revise it')
+      }
+      const plan = state.plan === undefined
+        ? event.plan
+        : { ...event.plan, createdAt: state.plan.createdAt, version: state.plan.version + 1 }
+      return { ...state, plan, updatedAt: event.at }
+    }
+    case 'plan/recover': {
+      if (state.phase !== 'P1') throw new Error(`longhaul: a plan can only be recovered in P1 (current ${state.phase})`)
+      if (state.plan !== undefined) throw new Error('longhaul: a plan already exists; recovery is not available')
+      if (state.pendingApproval !== undefined) throw new Error('longhaul: cannot recover a plan while a submission is pending')
+      if (state.lastApproved?.phase !== 'P0') throw new Error('longhaul: plan recovery requires an approved P0')
+      if (event.reason.trim() === '') throw new Error('longhaul: plan recovery requires a non-empty reason')
+      return {
+        ...state,
+        plan: event.plan,
+        lastPlanRecovery: { at: event.at, reason: event.reason },
+        updatedAt: event.at,
+      }
+    }
     case 'phase/submit': {
       if (event.approval.phase !== state.phase) {
         throw new Error(`longhaul: submission phase ${event.approval.phase} does not match current ${state.phase}`)

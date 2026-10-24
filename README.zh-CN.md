@@ -7,10 +7,11 @@
 一个会话级模式，按“人做长任务”的方式推进：**需求 → 设计 → 开发 → 发布**。每个阶段闸门都提交交付件等待审批，并配套树形记忆（`decisions` / `findings` / `artifacts`）、预算约束下的子 Agent 派发，以及仅父会话可执行的集成闸门。
 
 > 状态：**0.1.0 候选版本**。插件已提供四阶段状态机、`longhaul_*` 工具
-> （status/plan/submit/dispatch/memory/change）、`/longhaul on|off|status`、带原生风险确认的
+> （status/plan/task/submit/dispatch/memory/change）、`/longhaul on|off|status`、带原生风险确认的
 > composer「长任务」chip、可持久化模式状态、带分支 ACL 的树记忆、预算核算与停止规则、
 > 结构化 brief 的子 Agent 派发、工具阶段/文件归属闸门、模型引导，以及设计变更回路。
-> chip 与模式开关已在真实 Desktop 验收；`typecheck`、110 个测试、`build` 均通过。
+> chip 与模式开关已在真实 Desktop 验收；`typecheck`、131 个测试、`build` 均通过；
+> better-sidebar 提供阶段闸门与任务树 tab。
 > `npm publish` 之前还剩：设置页、真实会话压缩验收、发布/CI 执行。
 > 见 [docs/RELEASE.zh-CN.md](docs/RELEASE.zh-CN.md)。
 
@@ -45,6 +46,45 @@ pnpm dsh plugin --profile desktop remove dsh-longhaul
 每个闸门都需要交付件文件和一次性审批（`longhaul_submit`）；P1 通过前实现写入保持阻塞。
 发现按分支隔离，决策全树共享，且只有父会话可提升。开发期提出的设计变更走
 `longhaul_change`，只重跑受影响的任务。
+
+## 侧边栏任务树
+
+安装 `dsh-better-sidebar` 后，插件会在其侧边栏注册一个 **长任务** tab（order 33，
+位于 Tasks 与 Side Chat 之间），只读展示整个过程：
+
+- **头部**：阶段、设计版本、最近更新时间与模式；
+- **摘要**：目标、`完成/总数`、子会话步数、进行中子会话、待审批项；
+- **阶段闸门**：P0 → P3 的 `完成 / 进行中 / 待审批 / 待开始`，交付件路径可点击打开；
+- **任务**：紧凑行；点击展开文件、依赖、每任务步预算和 owner 子会话。交付件/文件可打开，
+  有 owner 的任务可跳到子会话；
+- **证据**：decisions / findings / artifacts 的数量与最近记录，来自树记忆 sidecar。
+
+tab 不会在页面加载时自动打开。点击 composer 里 `Long Haul` chip 旁的 **任务** 按钮
+（或侧边栏 `+` 菜单）打开；从 chip 开启模式时会自动打开。阶段闸门行可直接点开交付件
+（`.longhaul/deliverables/00-requirements.md` … `03-release.md`）；没有 tab 时也可以在
+**Files** tab 里按这些路径打开。
+
+该 tab 和 chip 一样从 `longhaul` session projection 派生；`longhaul_plan` /
+`longhaul_task` / `longhaul_submit` 改变状态后会自动更新。`longhaul_task`
+（`status`、可选 `ownerSessionId`）用于在 P2/P3 保持任务树与实际进度一致。
+未安装 better-sidebar 时 chip 与工具仍可用，任务数据仍可由任何读取 `longhaul`
+projection 的客户端使用。
+
+> better-sidebar 自带的 **Tasks** tab 展示实时子 Agent 拓扑；长任务 tab 展示持久化的
+> 阶段/计划树，两者可以同时打开。
+
+## 闸门行为
+
+- **P0/P1**：所有实现写入都被阻塞，包括 `write`/`edit` 与 shell 命令。只允许写
+  `.longhaul/` 交付件，以及保守的只读 shell allowlist（`git status/diff/log/show`、`rg`、
+  PowerShell 只读 cmdlet、`pnpm typecheck`）。
+- **计划先行**：P0 提交前必须先 `longhaul_plan`。计划默认不可覆盖；需要修改时用
+  `mode: "revise"` 并提供原因；遗留 P1 无计划会话可用 `mode: "recover"` 恢复一次。
+- **路径**：交付件和工作路径使用会话当前目录（`working_directory`），而不是不可变的
+  session header 目录。
+- **P2 子会话**：只能写自己 plan 任务拥有的文件；shell 写入与集成命令仍仅限父会话。
+- **边界**：这是协作策略，不是安全沙箱。shell 分类刻意保守，allowlist 之外一律拒绝。
+  P0/P1 不提供测试、构建、安装或临时脚本；请放到 P2 或 workspace 外的临时副本执行。
 
 ## 兼容性与发布
 
